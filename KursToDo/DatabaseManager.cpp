@@ -49,6 +49,11 @@ bool DatabaseManager::createTables()
         return false;
     }
 
+    query.exec("CREATE TABLE IF NOT EXISTS Users ("
+               "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+               "username TEXT UNIQUE,"
+               "password TEXT)");
+
     return true;
 }
 

@@ -2,6 +2,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSizePolicy>
+#include "RegistrationWindow.h"
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     QWidget *centralWidget = new QWidget(this);
@@ -16,6 +17,8 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     taskButton = new QPushButton("📋 Tasks");
     calendarButton = new QPushButton("📅 Calendar");
     notesButton = new QPushButton("📝 Notes");
+
+
 
     sideLayout->addWidget(taskButton);
     sideLayout->addWidget(calendarButton);
@@ -41,6 +44,14 @@ MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     mainLayout->addWidget(sidePanel);
     mainLayout->addWidget(stackedWidget);
     centralWidget->setLayout(mainLayout);
+
+    QPushButton *registerButton = new QPushButton("Регистрация");
+    mainLayout->addWidget(registerButton);
+    connect(registerButton, &QPushButton::clicked, this, [=]() {
+        RegistrationWindow *regWin = new RegistrationWindow;
+        regWin->setWindowModality(Qt::ApplicationModal);
+        regWin->show();
+    });
 
     connect(taskButton, &QPushButton::clicked, [=](){ stackedWidget->setCurrentIndex(0); });
     connect(calendarButton, &QPushButton::clicked, [=](){ stackedWidget->setCurrentIndex(1); });

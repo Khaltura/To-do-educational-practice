@@ -13,6 +13,7 @@ CONFIG += c++17
 SOURCES += \
     DatabaseManager.cpp \
     MainWindow.cpp \
+    RegistrationWindow.cpp \
     main.cpp
 
 HEADERS += \
@@ -20,6 +21,7 @@ HEADERS += \
     DatabaseManager.h \
     MainWindow.h \
     NotesWidget.h \
+    RegistrationWindow.h \
     TaskWidget.h
 
 FORMS +=
