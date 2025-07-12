@@ -3,78 +3,98 @@
 #include <QFormLayout>
 #include <QMessageBox>
 #include <QVBoxLayout>
+#include <QRegularExpression>
 
 RegistrationWindow::RegistrationWindow(QWidget *parent) :
     QDialog(parent),
     loginEdit(new QLineEdit(this)),
     passwordEdit(new QLineEdit(this)),
     confirmPasswordEdit(new QLineEdit(this)),
-    registerButton(new QPushButton("Зарегистрироваться", this))
+    registerButton(new QPushButton(tr("Зарегистрироваться"), this))
 {
-    setWindowTitle("Регистрация");
+    setWindowTitle(tr("Регистрация"));
     setFixedSize(350, 200);
+    setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
 
-    QVBoxLayout *mainLayout = new QVBoxLayout(this);
-    QFormLayout *formLayout = new QFormLayout();
-
+    // Настройка полей ввода
+    loginEdit->setPlaceholderText(tr("Введите логин"));
+    passwordEdit->setPlaceholderText(tr("Введите пароль"));
+    confirmPasswordEdit->setPlaceholderText(tr("Подтвердите пароль"));
     passwordEdit->setEchoMode(QLineEdit::Password);
     confirmPasswordEdit->setEchoMode(QLineEdit::Password);
 
-    formLayout->addRow("Логин:", loginEdit);
-    formLayout->addRow("Пароль:", passwordEdit);
-    formLayout->addRow("Подтвердите пароль:", confirmPasswordEdit);
+    // Настройка кнопки
+    registerButton->setCursor(Qt::PointingHandCursor);
+
+    // Создание layout
+    QVBoxLayout *mainLayout = new QVBoxLayout(this);
+    QFormLayout *formLayout = new QFormLayout();
+
+    formLayout->addRow(tr("Логин:"), loginEdit);
+    formLayout->addRow(tr("Пароль:"), passwordEdit);
+    formLayout->addRow(tr("Подтвердите пароль:"), confirmPasswordEdit);
 
     mainLayout->addLayout(formLayout);
     mainLayout->addWidget(registerButton);
 
+    // Подключение сигналов
     connect(registerButton, &QPushButton::clicked, this, &RegistrationWindow::attemptRegistration);
+    connect(loginEdit, &QLineEdit::returnPressed, this, &RegistrationWindow::attemptRegistration);
+    connect(passwordEdit, &QLineEdit::returnPressed, this, &RegistrationWindow::attemptRegistration);
+    connect(confirmPasswordEdit, &QLineEdit::returnPressed, this, &RegistrationWindow::attemptRegistration);
 }
 
 void RegistrationWindow::attemptRegistration()
 {
-    DatabaseManager &dbManager = DatabaseManager::instance();
-
     QString login = loginEdit->text().trimmed();
     QString password = passwordEdit->text();
     QString confirmPassword = confirmPasswordEdit->text();
 
-    // Проверка пустых полей
+    // Валидация данных
     if (login.isEmpty() || password.isEmpty() || confirmPassword.isEmpty()) {
-        QMessageBox::warning(this, "Ошибка", "Все поля должны быть заполнены");
+        showErrorMessage(tr("Все поля должны быть заполнены"));
         return;
     }
 
-    // Проверка длины логина
-    if (login.length() < 3) {
-        QMessageBox::warning(this, "Ошибка", "Логин должен содержать не менее 3 символов");
+    if (login.length() < 3 || login.length() > 20) {
+        showErrorMessage(tr("Логин должен содержать от 3 до 20 символов"));
         return;
     }
 
-    // Проверка совпадения паролей
-    if (password != confirmPassword) {
-        QMessageBox::warning(this, "Ошибка", "Пароли не совпадают");
+    if (!QRegularExpression("^[a-zA-Z0-9_]+$").match(login).hasMatch()) {
+        showErrorMessage(tr("Логин может содержать только латинские буквы, цифры и подчеркивание"));
         return;
     }
 
-    // Проверка длины пароля
     if (password.length() < 6) {
-        QMessageBox::warning(this, "Ошибка", "Пароль должен содержать не менее 6 символов");
+        showErrorMessage(tr("Пароль должен содержать не менее 6 символов"));
+        return;
+    }
+
+    if (password != confirmPassword) {
+        showErrorMessage(tr("Пароли не совпадают"));
         return;
     }
 
     // Попытка регистрации
-    if (dbManager.registerUser(login, password)) {
-        QMessageBox::information(this, "Успех", "Регистрация прошла успешно!");
-        accept();
-    } else {
-        QString errorMessage = "Не удалось зарегистрироваться.\n";
+    DatabaseManager &dbManager = DatabaseManager::instance();
 
-        if (dbManager.userExists(login)) {
-            errorMessage += "Пользователь с таким логином уже существует.";
-        } else {
-            errorMessage += "Ошибка базы данных: " + dbManager.lastError().text();
-        }
-
-        QMessageBox::critical(this, "Ошибка", errorMessage);
+    if (dbManager.userExists(login)) {
+        showErrorMessage(tr("Пользователь с таким логином уже существует"));
+        return;
     }
+
+    if (!dbManager.registerUser(login, password)) {
+        showErrorMessage(tr("Ошибка регистрации: ") + dbManager.lastError().text());
+        return;
+    }
+
+    QMessageBox::information(this, tr("Успех"), tr("Регистрация прошла успешно!"));
+    accept();
+}
+
+void RegistrationWindow::showErrorMessage(const QString &message)
+{
+    QMessageBox::warning(this, tr("Ошибка"), message);
+    loginEdit->setFocus();
 }

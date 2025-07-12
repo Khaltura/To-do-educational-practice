@@ -43,8 +43,10 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(userWidget, &UserWidget::registrationRequested, this, &MainWindow::showRegistrationWindow);
     connect(userWidget, &UserWidget::loginRequested, this, &MainWindow::showLoginWindow);
-    connect(&DatabaseManager::instance(), &DatabaseManager::authStateChanged, this, [this](bool isLoggedIn) {
-        if (isLoggedIn) {
+
+    // Исправлено: сигнал без параметров, в лямбде проверяем состояние через isLoggedIn()
+    connect(&DatabaseManager::instance(), &DatabaseManager::authStateChanged, this, [this]() {
+        if (DatabaseManager::instance().isLoggedIn()) {
             handleUserLoggedIn();
         } else {
             handleUserLoggedOut();

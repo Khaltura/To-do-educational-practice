@@ -3,7 +3,7 @@
 
 #include <QObject>
 #include <QSqlDatabase>
-#include <QSqlError>  // Добавлен этот include
+#include <QSqlError>
 #include <QString>
 #include <QStringList>
 
@@ -13,36 +13,40 @@ class DatabaseManager : public QObject
 public:
     static DatabaseManager& instance();
 
-    bool openDatabase(const QString &path);
-    bool isOpen() const;
+    bool isConnected() const;
     QSqlError lastError() const;
 
-    bool userExists(const QString &login);
-    bool registerUser(const QString &login, const QString &password);
-    bool loginUser(const QString &login, const QString &password);
+    bool registerUser(const QString& username, const QString& password);
+    bool loginUser(const QString& username, const QString& password);
     void logout();
     bool isLoggedIn() const;
     QString currentUser() const;
-
-    bool createGroup(const QString &groupName, QString &groupCode);
-    bool joinGroup(const QString &groupCode);
     QString currentUserGroup() const;
-    QString getGroupName(const QString &groupCode) const;
-    QStringList getGroupMembers(const QString &groupCode) const;
+    bool userExists(const QString& username) const;
+
+    bool createGroup(const QString& groupName, QString &groupCode);
+    bool joinGroup(const QString& groupCode);
     bool leaveGroup();
+    QString getGroupName(const QString& groupId) const;
+    QStringList getGroupMembers(const QString& groupId) const;
 
 signals:
-    void authStateChanged(bool isLoggedIn);
+    void authStateChanged();
 
 private:
-    DatabaseManager(QObject *parent = nullptr);
+    explicit DatabaseManager(QObject *parent = nullptr);
     ~DatabaseManager();
 
-    bool createTables();
+    bool checkDatabaseStructure() const;
+    void initializeDatabase();
 
     QSqlDatabase m_db;
+    bool m_loggedIn;
     QString m_currentUser;
-    bool m_isLoggedIn;
+    QString m_currentUserGroup;
+
+    DatabaseManager(const DatabaseManager&) = delete;
+    DatabaseManager& operator=(const DatabaseManager&) = delete;
 };
 
 #endif // DATABASEMANAGER_H

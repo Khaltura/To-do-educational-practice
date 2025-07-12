@@ -2,7 +2,7 @@
 #include <QMessageBox>
 #include <QStandardPaths>
 #include <QDir>
-#include <QFileInfo>
+#include <QDebug>
 #include "MainWindow.h"
 #include "DatabaseManager.h"
 
@@ -53,25 +53,18 @@ int main(int argc, char *argv[]) {
         }
     )");
 
-    // Инициализация базы данных с правильным путём
-    QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-
-    // Создаём директорию, если её нет
-    QDir().mkpath(dbPath);
-
-    // Полный путь к файлу БД
-    dbPath += "/todo_app.db";
-
-    qDebug() << "Database path:" << dbPath;
-
+    // Получаем экземпляр DatabaseManager
     DatabaseManager& dbManager = DatabaseManager::instance();
-    if (!dbManager.openDatabase(dbPath)) {
+
+    // Проверяем наличие ошибки (альтернатива isConnected)
+    if (dbManager.lastError().isValid()) {
         QMessageBox::critical(nullptr, "Ошибка",
-                              QString("Не удалось открыть базу данных.\nПуть: %1\nОшибка: %2")
-                                  .arg(dbPath)
-                                  .arg(dbManager.lastError().text()));
+                              "Не удалось подключиться к базе данных.\n"
+                              "Ошибка: " + dbManager.lastError().text());
         return -1;
     }
+
+    qDebug() << "Приложение успешно инициализировано";
 
     MainWindow window;
     window.setMinimumSize(800, 600);

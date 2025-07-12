@@ -4,9 +4,6 @@
 #include <QDialog>
 #include <QLineEdit>
 #include <QPushButton>
-#include <QVBoxLayout>
-#include <QFormLayout>
-#include <QMessageBox>
 
 class RegistrationWindow : public QDialog
 {
@@ -14,15 +11,23 @@ class RegistrationWindow : public QDialog
 
 public:
     explicit RegistrationWindow(QWidget *parent = nullptr);
+    ~RegistrationWindow() = default;
 
 private slots:
     void attemptRegistration();
 
 private:
+    void showErrorMessage(const QString &message);
+    bool validateInput(const QString &login, const QString &password, const QString &confirmPassword);
+
     QLineEdit *loginEdit;
     QLineEdit *passwordEdit;
     QLineEdit *confirmPasswordEdit;
     QPushButton *registerButton;
+
+    // Запрещаем копирование
+    RegistrationWindow(const RegistrationWindow&) = delete;
+    RegistrationWindow& operator=(const RegistrationWindow&) = delete;
 };
 
 #endif // REGISTRATIONWINDOW_H
