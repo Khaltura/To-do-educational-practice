@@ -3,17 +3,17 @@
 
 #include <QMainWindow>
 #include <QStackedWidget>
+#include <QPushButton>
+#include <QWidget>
 
-class QWidget;
-class QVBoxLayout;
-class QHBoxLayout;
-class QPushButton;
+// Forward declarations
 class TaskWidget;
 class CalendarWidget;
 class NotesWidget;
 class UserWidget;
 class RegistrationWindow;
 class LoginWindow;
+class DatabaseManager;
 
 class MainWindow : public QMainWindow
 {
@@ -33,20 +33,23 @@ private:
     void setupSidePanel();
     void setupMainContent();
 
-    QWidget *sidePanel;
-    QPushButton *taskButton;
-    QPushButton *calendarButton;
-    QPushButton *notesButton;
-    QPushButton *userButton;
+    // UI Elements
+    QWidget *m_sidePanel;
+    QPushButton *m_taskButton;
+    QPushButton *m_calendarButton;
+    QPushButton *m_notesButton;
+    QPushButton *m_userButton;
 
-    TaskWidget *taskWidget;
-    CalendarWidget *calendarWidget;
-    NotesWidget *notesWidget;
-    UserWidget *userWidget;
+    // Main Widgets
+    TaskWidget *m_taskWidget;
+    CalendarWidget *m_calendarWidget;
+    NotesWidget *m_notesWidget;
+    UserWidget *m_userWidget;
+    QStackedWidget *m_stackedWidget;
 
-    QStackedWidget *stackedWidget;
-    RegistrationWindow *regWindow;
-    LoginWindow *loginWindow;
+    // Auth Windows
+    RegistrationWindow *m_regWindow;
+    LoginWindow *m_loginWindow;
 };
 
 #endif // MAINWINDOW_H

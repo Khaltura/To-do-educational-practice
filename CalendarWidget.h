@@ -8,7 +8,9 @@
 #include <QDialog>
 #include <QListWidget>
 #include <QPushButton>
+#include <QDate>
 #include "TaskWidget.h"
+#include "DatabaseManager.h"
 
 class CalendarWidget : public QWidget {
     Q_OBJECT
@@ -24,11 +26,11 @@ public:
 
 private slots:
     void showTasksOnDate(const QDate &date) {
-        QString dateStr = date.toString("dd.MM.yyyy");
-        QList<QString> tasks = m_taskWidget->getTasksForDate(dateStr);
+        // Получаем задачи через DatabaseManager вместо TaskWidget
+        QList<QString> tasks = DatabaseManager::instance().getTasksForDate(date);
 
         QDialog dialog(this);
-        dialog.setWindowTitle(QString("Задачи на %1").arg(dateStr));
+        dialog.setWindowTitle(QString("Задачи на %1").arg(date.toString("dd.MM.yyyy")));
         dialog.resize(400, 300);
 
         QVBoxLayout *dialogLayout = new QVBoxLayout(&dialog);

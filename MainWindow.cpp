@@ -13,18 +13,18 @@
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
-    sidePanel(nullptr),
-    taskButton(nullptr),
-    calendarButton(nullptr),
-    notesButton(nullptr),
-    userButton(nullptr),
-    taskWidget(nullptr),
-    calendarWidget(nullptr),
-    notesWidget(nullptr),
-    userWidget(nullptr),
-    stackedWidget(new QStackedWidget(this)),
-    regWindow(nullptr),
-    loginWindow(nullptr)
+    m_sidePanel(new QWidget(this)),
+    m_taskButton(new QPushButton("\xF0\x9F\x93\x8B Задачи", this)),
+    m_calendarButton(new QPushButton("\xF0\x9F\x93\x85 Календарь", this)),
+    m_notesButton(new QPushButton("\xF0\x9F\x93\x9D Заметки", this)),
+    m_userButton(new QPushButton("\xF0\x9F\x91\xA4 Пользователь", this)),
+    m_taskWidget(new TaskWidget(&DatabaseManager::instance(), this)),
+    m_calendarWidget(new CalendarWidget(m_taskWidget, this)),
+    m_notesWidget(new NotesWidget(&DatabaseManager::instance(), this)),
+    m_userWidget(new UserWidget(this)),
+    m_stackedWidget(new QStackedWidget(this)),
+    m_regWindow(nullptr),
+    m_loginWindow(nullptr)
 {
     setWindowTitle("To-Do Приложение");
     resize(1000, 600);
@@ -36,22 +36,17 @@ MainWindow::MainWindow(QWidget *parent)
     setupSidePanel();
 
     QHBoxLayout *mainLayout = new QHBoxLayout(centralWidget);
-    mainLayout->addWidget(sidePanel);
-    mainLayout->addWidget(stackedWidget, 1);
+    mainLayout->addWidget(m_sidePanel);
+    mainLayout->addWidget(m_stackedWidget, 1);
     mainLayout->setContentsMargins(0, 0, 0, 0);
     mainLayout->setSpacing(0);
 
-    connect(userWidget, &UserWidget::registrationRequested, this, &MainWindow::showRegistrationWindow);
-    connect(userWidget, &UserWidget::loginRequested, this, &MainWindow::showLoginWindow);
+    connect(m_userWidget, &UserWidget::registrationRequested, this, &MainWindow::showRegistrationWindow);
+    connect(m_userWidget, &UserWidget::loginRequested, this, &MainWindow::showLoginWindow);
 
-    // Исправлено: сигнал без параметров, в лямбде проверяем состояние через isLoggedIn()
-    connect(&DatabaseManager::instance(), &DatabaseManager::authStateChanged, this, [this]() {
-        if (DatabaseManager::instance().isLoggedIn()) {
-            handleUserLoggedIn();
-        } else {
-            handleUserLoggedOut();
-        }
-    });
+    auto& dbManager = DatabaseManager::instance();
+    connect(&dbManager, &DatabaseManager::loggedIn, this, &MainWindow::handleUserLoggedIn);
+    connect(&dbManager, &DatabaseManager::loggedOut, this, &MainWindow::handleUserLoggedOut);
 }
 
 MainWindow::~MainWindow()
@@ -60,17 +55,16 @@ MainWindow::~MainWindow()
 
 void MainWindow::setupSidePanel()
 {
-    sidePanel = new QWidget(this);
-    sidePanel->setObjectName("sidePanel");
-    sidePanel->setFixedWidth(200);
-    sidePanel->setStyleSheet(R"(
+    m_sidePanel->setObjectName("sidePanel");
+    m_sidePanel->setFixedWidth(200);
+    m_sidePanel->setStyleSheet(R"(
         QWidget#sidePanel {
             background-color: #1e1e1e;
             border-right: 1px solid #444;
         }
     )");
 
-    QVBoxLayout *sideLayout = new QVBoxLayout(sidePanel);
+    QVBoxLayout *sideLayout = new QVBoxLayout(m_sidePanel);
     sideLayout->setContentsMargins(10, 20, 10, 20);
     sideLayout->setSpacing(15);
 
@@ -89,87 +83,83 @@ void MainWindow::setupSidePanel()
         }
     )";
 
-    taskButton = new QPushButton("\xF0\x9F\x93\x8B Задачи", sidePanel);
-    calendarButton = new QPushButton("\xF0\x9F\x93\x85 Календарь", sidePanel);
-    notesButton = new QPushButton("\xF0\x9F\x93\x9D Заметки", sidePanel);
-    userButton = new QPushButton("\xF0\x9F\x91\xA4 Пользователь", sidePanel);
+    m_taskButton->setStyleSheet(sideButtonStyle);
+    m_calendarButton->setStyleSheet(sideButtonStyle);
+    m_notesButton->setStyleSheet(sideButtonStyle);
+    m_userButton->setStyleSheet(sideButtonStyle);
 
-    taskButton->setStyleSheet(sideButtonStyle);
-    calendarButton->setStyleSheet(sideButtonStyle);
-    notesButton->setStyleSheet(sideButtonStyle);
-    userButton->setStyleSheet(sideButtonStyle);
-
-    sideLayout->addWidget(taskButton);
-    sideLayout->addWidget(calendarButton);
-    sideLayout->addWidget(notesButton);
+    sideLayout->addWidget(m_taskButton);
+    sideLayout->addWidget(m_calendarButton);
+    sideLayout->addWidget(m_notesButton);
     sideLayout->addStretch();
-    sideLayout->addWidget(userButton);
+    sideLayout->addWidget(m_userButton);
 
-    connect(taskButton, &QPushButton::clicked, this, [this]() {
-        stackedWidget->setCurrentIndex(0);
+    connect(m_taskButton, &QPushButton::clicked, this, [this]() {
+        m_stackedWidget->setCurrentIndex(0);
     });
-    connect(calendarButton, &QPushButton::clicked, this, [this]() {
-        stackedWidget->setCurrentIndex(1);
+    connect(m_calendarButton, &QPushButton::clicked, this, [this]() {
+        m_stackedWidget->setCurrentIndex(1);
     });
-    connect(notesButton, &QPushButton::clicked, this, [this]() {
-        stackedWidget->setCurrentIndex(2);
+    connect(m_notesButton, &QPushButton::clicked, this, [this]() {
+        m_stackedWidget->setCurrentIndex(2);
     });
-    connect(userButton, &QPushButton::clicked, this, [this]() {
-        stackedWidget->setCurrentIndex(3);
+    connect(m_userButton, &QPushButton::clicked, this, [this]() {
+        m_stackedWidget->setCurrentIndex(3);
     });
 }
 
 void MainWindow::setupMainContent()
 {
-    taskWidget = new TaskWidget(this);
-    calendarWidget = new CalendarWidget(taskWidget, this);
-    notesWidget = new NotesWidget(this);
-    userWidget = new UserWidget(this);
-
-    stackedWidget->addWidget(taskWidget);
-    stackedWidget->addWidget(calendarWidget);
-    stackedWidget->addWidget(notesWidget);
-    stackedWidget->addWidget(userWidget);
+    m_stackedWidget->addWidget(m_taskWidget);
+    m_stackedWidget->addWidget(m_calendarWidget);
+    m_stackedWidget->addWidget(m_notesWidget);
+    m_stackedWidget->addWidget(m_userWidget);
 
     setStyleSheet("background-color: #121212; color: white;");
 }
 
 void MainWindow::showRegistrationWindow()
 {
-    if (!regWindow) {
-        regWindow = new RegistrationWindow(this);
-        connect(regWindow, &RegistrationWindow::finished, this, [this]() {
-            regWindow->deleteLater();
-            regWindow = nullptr;
+    if (!m_regWindow) {
+        m_regWindow = new RegistrationWindow(this);
+        connect(m_regWindow, &RegistrationWindow::finished, this, [this]() {
+            m_regWindow->deleteLater();
+            m_regWindow = nullptr;
         });
     }
-    regWindow->show();
+    m_regWindow->show();
 }
 
 void MainWindow::showLoginWindow()
 {
-    if (!loginWindow) {
-        loginWindow = new LoginWindow(this);
-        connect(loginWindow, &LoginWindow::finished, this, [this]() {
-            loginWindow->deleteLater();
-            loginWindow = nullptr;
+    if (!m_loginWindow) {
+        m_loginWindow = new LoginWindow(this);
+        connect(m_loginWindow, &LoginWindow::finished, this, [this]() {
+            m_loginWindow->deleteLater();
+            m_loginWindow = nullptr;
         });
     }
-    loginWindow->show();
+    m_loginWindow->show();
 }
 
 void MainWindow::handleUserLoggedIn()
 {
-    if (DatabaseManager::instance().isLoggedIn()) {
-        userWidget->updateUI();
-        stackedWidget->setCurrentIndex(3);
-        QMessageBox::information(this, "Успех", "Вы успешно вошли в систему");
-    }
+    m_userWidget->updateUI();
+    m_stackedWidget->setCurrentIndex(3);
+    QMessageBox::information(this, "Успех", "Вы успешно вошли в систему");
+
+    // Обновляем данные во всех виджетах
+    m_taskWidget->refreshTasks();
+    m_notesWidget->loadNotes();
 }
 
 void MainWindow::handleUserLoggedOut()
 {
-    userWidget->updateUI();
-    stackedWidget->setCurrentIndex(3);
+    m_userWidget->updateUI();
+    m_stackedWidget->setCurrentIndex(3);
     QMessageBox::information(this, "Выход", "Вы вышли из системы");
+
+    // Очищаем данные во всех виджетах
+    m_taskWidget->handleUserLoggedOut(); // Используем публичный метод
+    m_notesWidget->clearNotes();
 }

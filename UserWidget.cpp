@@ -47,7 +47,7 @@ UserWidget::UserWidget(QWidget *parent) : QWidget(parent)
                          "margin-bottom: 5px;"
                          "}";
 
-    // Стиль для списка участников (черный фон)
+    // Стиль для списка участников
     QString listStyle = R"(
         QListWidget {
             border: 1px solid #444;
@@ -96,20 +96,25 @@ UserWidget::UserWidget(QWidget *parent) : QWidget(parent)
     connect(m_createGroupButton, &QPushButton::clicked, this, &UserWidget::handleCreateGroup);
     connect(m_joinGroupButton, &QPushButton::clicked, this, &UserWidget::handleJoinGroup);
     connect(m_leaveGroupButton, &QPushButton::clicked, this, &UserWidget::handleLeaveGroup);
-    connect(&DatabaseManager::instance(), &DatabaseManager::authStateChanged, this, &UserWidget::updateUI);
+
+    // Исправленные подключения сигналов
+    auto& dbManager = DatabaseManager::instance();
+    connect(&dbManager, &DatabaseManager::loggedIn, this, &UserWidget::updateUI);
+    connect(&dbManager, &DatabaseManager::loggedOut, this, &UserWidget::updateUI);
 
     updateUI();
 }
 
 void UserWidget::updateUI()
 {
-    bool isLoggedIn = DatabaseManager::instance().isLoggedIn();
-    QString username = DatabaseManager::instance().currentUser();
-    QString groupId = DatabaseManager::instance().currentUserGroup();
+    auto& dbManager = DatabaseManager::instance();
+    bool isLoggedIn = dbManager.isLoggedIn();
+    QString username = dbManager.currentUser();
+    QString groupId = dbManager.currentUserGroup();
 
     m_userLabel->setText(isLoggedIn ? "Пользователь: " + username : "Гость");
 
-    // Управление видимостью
+    // Управление видимостью элементов
     m_registerButton->setVisible(!isLoggedIn);
     m_loginButton->setVisible(!isLoggedIn);
     m_logoutButton->setVisible(isLoggedIn);
@@ -120,20 +125,18 @@ void UserWidget::updateUI()
     m_membersList->setVisible(isLoggedIn && !groupId.isEmpty());
 
     if (isLoggedIn && !groupId.isEmpty()) {
-        QString groupName = DatabaseManager::instance().getGroupName(groupId);
+        QString groupName = dbManager.getGroupName(groupId);
         m_groupLabel->setText(QString("Группа: %1 (ID: %2)").arg(groupName).arg(groupId));
 
         // Обновляем список участников
-        QStringList members = DatabaseManager::instance().getGroupMembers(groupId);
         m_membersList->clear();
-        foreach (const QString &member, members) {
+        foreach (const QString &member, dbManager.getGroupMembers(groupId)) {
             QListWidgetItem *item = new QListWidgetItem(member, m_membersList);
-            item->setForeground(QBrush(QColor("#E0E0E0"))); // Цвет текста
+            item->setForeground(Qt::white);
         }
     }
 }
 
-// Реализации handleCreateGroup, handleJoinGroup, handleLeaveGroup остаются без изменений
 void UserWidget::handleCreateGroup()
 {
     GroupDialog dialog(GroupDialog::CreateGroup, this);
@@ -145,7 +148,8 @@ void UserWidget::handleCreateGroup()
                                      QString("Группа создана!\nКод: %1").arg(groupCode));
             updateUI();
         } else {
-            QMessageBox::warning(this, "Ошибка", "Ошибка создания группы");
+            QMessageBox::warning(this, "Ошибка",
+                                 "Ошибка создания группы: " + DatabaseManager::instance().lastError().text());
         }
     }
 }
@@ -159,7 +163,8 @@ void UserWidget::handleJoinGroup()
             QMessageBox::information(this, "Успех", "Вы в группе!");
             updateUI();
         } else {
-            QMessageBox::warning(this, "Ошибка", "Неверный код группы");
+            QMessageBox::warning(this, "Ошибка",
+                                 "Неверный код группы: " + DatabaseManager::instance().lastError().text());
         }
     }
 }
@@ -170,7 +175,8 @@ void UserWidget::handleLeaveGroup()
         QMessageBox::information(this, "Успех", "Вы вышли из группы");
         updateUI();
     } else {
-        QMessageBox::warning(this, "Ошибка", "Ошибка выхода из группы");
+        QMessageBox::warning(this, "Ошибка",
+                             "Ошибка выхода из группы: " + DatabaseManager::instance().lastError().text());
     }
 }
 
