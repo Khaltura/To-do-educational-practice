@@ -5,6 +5,8 @@
 #include <QVBoxLayout>
 #include <QRegularExpression>
 #include <QSqlError>
+#include <QDebug>
+#include <QDir>
 
 RegistrationWindow::RegistrationWindow(QWidget *parent) :
     QDialog(parent),
@@ -18,8 +20,8 @@ RegistrationWindow::RegistrationWindow(QWidget *parent) :
     setWindowFlags(windowFlags() & ~Qt::WindowContextHelpButtonHint);
 
     // Настройка полей ввода
-    loginEdit->setPlaceholderText(tr("Введите логин"));
-    passwordEdit->setPlaceholderText(tr("Введите пароль"));
+    loginEdit->setPlaceholderText(tr("Введите логин (латиница/цифры)"));
+    passwordEdit->setPlaceholderText(tr("Введите пароль (6+ символов)"));
     confirmPasswordEdit->setPlaceholderText(tr("Подтвердите пароль"));
     passwordEdit->setEchoMode(QLineEdit::Password);
     confirmPasswordEdit->setEchoMode(QLineEdit::Password);
@@ -47,9 +49,16 @@ RegistrationWindow::RegistrationWindow(QWidget *parent) :
 
 void RegistrationWindow::attemptRegistration()
 {
+    qDebug() << "=== Начало попытки регистрации ===";
+
     QString login = loginEdit->text().trimmed();
     QString password = passwordEdit->text();
     QString confirmPassword = confirmPasswordEdit->text();
+
+    qDebug() << "Введенные данные:";
+    qDebug() << "Логин:" << login;
+    qDebug() << "Пароль:" << QString(password.length(), '*');
+    qDebug() << "Подтверждение:" << QString(confirmPassword.length(), '*');
 
     // Валидация данных
     if (login.isEmpty() || password.isEmpty() || confirmPassword.isEmpty()) {
@@ -63,7 +72,7 @@ void RegistrationWindow::attemptRegistration()
     }
 
     if (!QRegularExpression("^[a-zA-Z0-9_]+$").match(login).hasMatch()) {
-        showErrorMessage(tr("Логин может содержать только латинские буквы, цифры и подчеркивание"));
+        showErrorMessage(tr("Логин может содержать только:\n- Латинские буквы (A-Z, a-z)\n- Цифры (0-9)\n- Символ подчеркивания (_)"));
         return;
     }
 
@@ -79,23 +88,35 @@ void RegistrationWindow::attemptRegistration()
 
     // Попытка регистрации
     DatabaseManager &dbManager = DatabaseManager::instance();
+    qDebug() << "Проверка существования пользователя...";
 
     if (dbManager.userExists(login)) {
         showErrorMessage(tr("Пользователь с таким логином уже существует"));
         return;
     }
 
+    qDebug() << "Попытка регистрации нового пользователя...";
     if (!dbManager.registerUser(login, password)) {
-        showErrorMessage(tr("Ошибка регистрации: ") + dbManager.lastError().text());
+        showErrorMessage(tr("Ошибка при создании пользователя.\nПопробуйте другой логин или перезапустите приложение."));
+
+        // Дополнительная диагностика
+        QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        qDebug() << "Диагностика:";
+        qDebug() << "Путь к базе данных:" << dbPath;
+        qDebug() << "Существует ли директория:" << QDir(dbPath).exists();
+        qDebug() << "Содержимое директории:" << QDir(dbPath).entryList();
+
         return;
     }
 
-    QMessageBox::information(this, tr("Успех"), tr("Регистрация прошла успешно!"));
+    qDebug() << "Регистрация прошла успешно!";
+    QMessageBox::information(this, tr("Успех"), tr("Регистрация завершена успешно!\nТеперь вы можете войти в систему."));
     accept();
 }
 
 void RegistrationWindow::showErrorMessage(const QString &message)
 {
+    qDebug() << "Ошибка регистрации:" << message;
     QMessageBox::warning(this, tr("Ошибка"), message);
     loginEdit->setFocus();
 }

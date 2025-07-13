@@ -17,9 +17,18 @@ class DatabaseManager : public QObject
     Q_OBJECT
 
 public:
+    enum DbMode {
+        PersonalDb,
+        GroupDb
+    };
+
     static DatabaseManager& instance();
 
-    // Все существующие методы остаются без изменений
+    // Методы для работы с режимом БД
+    DbMode currentDbMode() const { return m_currentDbMode; }
+    bool isGroupMode() const { return m_currentDbMode == GroupDb; }
+
+    // Основные методы
     bool isConnected() const;
     bool registerUser(const QString& username, const QString& password);
     bool loginUser(const QString& username, const QString& password);
@@ -29,7 +38,7 @@ public:
     QString currentUserGroup() const;
     QSqlError lastError() const;
 
-    // Методы для работы с задачами (остаются без изменений)
+    // Методы для работы с задачами
     bool saveTask(const QString& text, const QDate& date, const QTime& time,
                   const QString& tag, bool completed);
     QList<QMap<QString, QVariant>> getTasks() const;
@@ -39,13 +48,13 @@ public:
     QList<QString> getAvailableTags() const;
     QList<QDate> getDatesWithTasks() const;
 
-    // Методы для работы с заметками (остаются без изменений)
+    // Методы для работы с заметками
     bool saveNote(const QString& content);
     QList<QMap<QString, QVariant>> getNotes() const;
     bool updateNote(int noteId, const QString& content);
     bool deleteNote(int noteId);
 
-    // Методы для работы с группами (модифицируются)
+    // Методы для работы с группами
     bool createGroup(const QString& groupName, QString &groupCode);
     bool joinGroup(const QString& groupCode);
     bool leaveGroup();
@@ -53,7 +62,7 @@ public:
     QStringList getGroupMembers(const QString& groupId) const;
     bool userExists(const QString &login) const;
 
-    // Новый метод для очистки базы данных
+    // Метод для очистки базы данных
     void dropAllTables();
 
 signals:
@@ -67,11 +76,6 @@ private:
     DatabaseManager(QObject *parent = nullptr);
     ~DatabaseManager();
 
-    enum DbMode {
-        PersonalDb,
-        GroupDb
-    };
-
     void initializeMainDatabase();
     void initializeCurrentDatabase();
     bool switchToPersonalDatabase();
@@ -82,7 +86,6 @@ private:
     QSqlDatabase m_mainDb;         // Основная база (пользователи и группы)
     QSqlDatabase m_currentDb;      // Текущая активная база (персональная или групповая)
 
-    // Все существующие поля остаются
     bool m_loggedIn;
     QString m_currentUser;
     QString m_currentUserGroup;

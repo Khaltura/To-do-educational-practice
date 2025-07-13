@@ -26,8 +26,9 @@ public:
         setupUI();
         connect(m_dbManager, &DatabaseManager::loggedIn, this, &NotesWidget::loadNotes);
         connect(m_dbManager, &DatabaseManager::loggedOut, this, &NotesWidget::clearNotes);
+        connect(m_dbManager, &DatabaseManager::groupChanged, this, &NotesWidget::loadNotes);
+        connect(m_dbManager, &DatabaseManager::notesUpdated, this, &NotesWidget::loadNotes);
 
-        // Загружаем заметки если пользователь уже вошел
         if (m_dbManager->isLoggedIn()) {
             loadNotes();
         }
@@ -38,7 +39,12 @@ public:
         if (m_dbManager->isLoggedIn()) {
             auto notes = m_dbManager->getNotes();
             for (const auto& note : notes) {
-                createNoteCard(note["id"].toInt(), note["content"].toString());
+                QString author = "";
+                if (m_dbManager->currentDbMode() == DatabaseManager::GroupDb) {
+                    author = note.contains("username") ? note["username"].toString() :
+                                 note.contains("user_id") ? QString::number(note["user_id"].toInt()) : "";
+                }
+                createNoteCard(note["id"].toInt(), note["content"].toString(), author);
             }
         }
     }
@@ -88,15 +94,13 @@ private slots:
             return;
         }
 
-        // Сохраняем заметку в БД
-        int noteId = m_dbManager->saveNote(html);
-        if (noteId != -1) {
-            createNoteCard(noteId, html);
-            m_noteInput->clear();
-            m_attachedImages.clear();
-        } else {
+        if (!m_dbManager->saveNote(html)) {
             QMessageBox::warning(this, "Ошибка", "Не удалось сохранить заметку");
+            return;
         }
+
+        m_noteInput->clear();
+        m_attachedImages.clear();
     }
 
 private:
@@ -108,10 +112,12 @@ private:
 
     void setupUI() {
         QVBoxLayout *mainLayout = new QVBoxLayout(this);
+        mainLayout->setContentsMargins(5, 5, 5, 5);
+        mainLayout->setSpacing(10);
 
         QLabel *title = new QLabel("📝 Заметки");
         title->setAlignment(Qt::AlignCenter);
-        title->setStyleSheet("font-size: 24px; font-weight: bold;");
+        title->setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 10px;");
         mainLayout->addWidget(title);
 
         m_noteInput = new QTextEdit;
@@ -124,13 +130,20 @@ private:
             "border-radius: 8px;"
             "padding: 8px;"
             );
-        m_noteInput->setFixedHeight(80);
+        m_noteInput->setFixedHeight(120);
         mainLayout->addWidget(m_noteInput);
 
         QHBoxLayout *buttonLayout = new QHBoxLayout;
+        buttonLayout->setSpacing(10);
+
         QPushButton *addImageBtn = new QPushButton("📌 Изображение");
         QPushButton *addBulletBtn = new QPushButton("• Список");
         QPushButton *addNoteBtn = new QPushButton("➕ Добавить заметку");
+
+        addImageBtn->setStyleSheet("padding: 5px;");
+        addBulletBtn->setStyleSheet("padding: 5px;");
+        addNoteBtn->setStyleSheet("padding: 5px; background-color: #4CAF50; color: white;");
+
         buttonLayout->addWidget(addImageBtn);
         buttonLayout->addWidget(addBulletBtn);
         buttonLayout->addWidget(addNoteBtn);
@@ -138,9 +151,14 @@ private:
 
         m_scrollArea = new QScrollArea;
         m_scrollArea->setWidgetResizable(true);
+        m_scrollArea->setStyleSheet("border: none;");
+
         QWidget *container = new QWidget;
         m_noteLayout = new QVBoxLayout(container);
         m_noteLayout->setAlignment(Qt::AlignTop);
+        m_noteLayout->setSpacing(15);
+        m_noteLayout->setContentsMargins(5, 5, 5, 5);
+
         container->setLayout(m_noteLayout);
         m_scrollArea->setWidget(container);
         mainLayout->addWidget(m_scrollArea);
@@ -150,72 +168,128 @@ private:
         connect(addNoteBtn, &QPushButton::clicked, this, &NotesWidget::addNote);
     }
 
-    void createNoteCard(int noteId, const QString& html) {
+    void createNoteCard(int noteId, const QString& html, const QString& author = "") {
         QFrame *noteFrame = new QFrame;
-        noteFrame->setFrameShape(QFrame::Box);
-        noteFrame->setStyleSheet("background-color: #2e2e2e; border-radius: 10px; padding: 8px;");
-        QVBoxLayout *frameLayout = new QVBoxLayout(noteFrame);
-        frameLayout->setSpacing(4);
+        noteFrame->setFrameShape(QFrame::StyledPanel);
+        noteFrame->setStyleSheet(
+            "background-color: #2e2e2e;"
+            "border-radius: 10px;"
+            "padding: 12px;"
+            "border: 1px solid #444;"
+            );
 
+        QVBoxLayout *frameLayout = new QVBoxLayout(noteFrame);
+        frameLayout->setSpacing(8);
+        frameLayout->setContentsMargins(5, 5, 5, 5);
+
+        // Заголовок заметки (с автором для группового режима)
+        QHBoxLayout *headerLayout = new QHBoxLayout;
+
+        if (!author.isEmpty()) {
+            QLabel *authorLabel = new QLabel("👤 " + author);
+            authorLabel->setStyleSheet(
+                "color: #aaa;"
+                "font-size: 12px;"
+                "font-style: italic;"
+                );
+            headerLayout->addWidget(authorLabel);
+        }
+
+        headerLayout->addStretch();
+        frameLayout->addLayout(headerLayout);
+
+        // Содержимое заметки
         QTextEdit *noteContent = new QTextEdit;
         noteContent->setHtml(html);
         noteContent->setReadOnly(true);
-        noteContent->setStyleSheet("background-color: #2e2e2e; color: white; border: none;");
-        noteContent->setMinimumHeight(120);
-        noteContent->setMaximumHeight(200);
+        noteContent->setStyleSheet(
+            "background-color: #2e2e2e;"
+            "color: white;"
+            "border: none;"
+            "font-size: 14px;"
+            );
+        noteContent->setMinimumHeight(100);
+        noteContent->setMaximumHeight(300);
         frameLayout->addWidget(noteContent);
 
-        QHBoxLayout *actionLayout = new QHBoxLayout;
-        QPushButton *editBtn = new QPushButton("✏️");
-        QPushButton *saveBtn = new QPushButton("💾");
-        QPushButton *openBtn = new QPushButton("🔎");
-        QPushButton *deleteBtn = new QPushButton("❌");
-        saveBtn->setEnabled(false);
-        actionLayout->addWidget(editBtn);
-        actionLayout->addWidget(saveBtn);
-        actionLayout->addWidget(openBtn);
-        actionLayout->addStretch();
-        actionLayout->addWidget(deleteBtn);
-        frameLayout->addLayout(actionLayout);
+        // Кнопки управления (только для своих заметок)
+        bool isMyNote = author.isEmpty() || (author == m_dbManager->currentUser());
+        if (isMyNote) {
+            QHBoxLayout *actionLayout = new QHBoxLayout;
+            actionLayout->setSpacing(5);
 
-        m_noteLayout->addWidget(noteFrame);
+            QPushButton *editBtn = new QPushButton("✏️ Редактировать");
+            QPushButton *saveBtn = new QPushButton("💾 Сохранить");
+            QPushButton *deleteBtn = new QPushButton("❌ Удалить");
 
-        connect(editBtn, &QPushButton::clicked, this, [=]() {
-            noteContent->setReadOnly(false);
-            saveBtn->setEnabled(true);
-            noteContent->setFocus();
-        });
+            editBtn->setStyleSheet("padding: 3px; font-size: 12px;");
+            saveBtn->setStyleSheet("padding: 3px; font-size: 12px; background-color: #4CAF50; color: white;");
+            deleteBtn->setStyleSheet("padding: 3px; font-size: 12px; background-color: #f44336; color: white;");
 
-        connect(saveBtn, &QPushButton::clicked, this, [=]() {
-            noteContent->setReadOnly(true);
             saveBtn->setEnabled(false);
-            m_dbManager->updateNote(noteId, noteContent->toHtml());
-        });
 
-        connect(deleteBtn, &QPushButton::clicked, this, [=]() {
-            if (m_dbManager->deleteNote(noteId)) {
-                m_noteLayout->removeWidget(noteFrame);
-                noteFrame->deleteLater();
-            }
-        });
+            actionLayout->addWidget(editBtn);
+            actionLayout->addWidget(saveBtn);
+            actionLayout->addStretch();
+            actionLayout->addWidget(deleteBtn);
+            frameLayout->addLayout(actionLayout);
 
-        connect(openBtn, &QPushButton::clicked, this, [=]() {
-            QDialog *dialog = new QDialog(this);
-            dialog->setWindowTitle("Просмотр заметки");
-            dialog->resize(800, 600);
+            // Обработчики кнопок
+            connect(editBtn, &QPushButton::clicked, this, [=]() {
+                noteContent->setReadOnly(false);
+                saveBtn->setEnabled(true);
+                noteContent->setFocus();
+            });
 
-            QVBoxLayout *dialogLayout = new QVBoxLayout(dialog);
+            connect(saveBtn, &QPushButton::clicked, this, [=]() {
+                noteContent->setReadOnly(true);
+                saveBtn->setEnabled(false);
+                m_dbManager->updateNote(noteId, noteContent->toHtml());
+            });
+
+            connect(deleteBtn, &QPushButton::clicked, this, [=]() {
+                if (QMessageBox::question(this, "Подтверждение",
+                                          "Удалить эту заметку?", QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes) {
+                    if (m_dbManager->deleteNote(noteId)) {
+                        m_noteLayout->removeWidget(noteFrame);
+                        noteFrame->deleteLater();
+                    }
+                }
+            });
+        }
+
+        // Кнопка просмотра (для всех заметок)
+        QPushButton *viewBtn = new QPushButton("🔍 Просмотреть");
+        viewBtn->setStyleSheet("padding: 3px; font-size: 12px;");
+        frameLayout->addWidget(viewBtn, 0, Qt::AlignRight);
+
+        connect(viewBtn, &QPushButton::clicked, this, [=]() {
+            QDialog *viewDialog = new QDialog(this);
+            viewDialog->setWindowTitle("Просмотр заметки");
+            viewDialog->resize(800, 600);
+
+            QVBoxLayout *dialogLayout = new QVBoxLayout(viewDialog);
+
             QTextBrowser *browser = new QTextBrowser;
             browser->setHtml(noteContent->toHtml());
-            browser->setStyleSheet("background-color: #1e1e1e; color: white;");
+            browser->setStyleSheet(
+                "background-color: #1e1e1e;"
+                "color: white;"
+                "border: none;"
+                "font-size: 16px;"
+                );
             dialogLayout->addWidget(browser);
 
             QPushButton *closeBtn = new QPushButton("Закрыть");
-            connect(closeBtn, &QPushButton::clicked, dialog, &QDialog::accept);
-            dialogLayout->addWidget(closeBtn);
+            closeBtn->setStyleSheet("padding: 5px;");
+            dialogLayout->addWidget(closeBtn, 0, Qt::AlignRight);
 
-            dialog->exec();
+            connect(closeBtn, &QPushButton::clicked, viewDialog, &QDialog::accept);
+
+            viewDialog->exec();
         });
+
+        m_noteLayout->addWidget(noteFrame);
     }
 };
 

@@ -121,14 +121,15 @@ bool DatabaseManager::switchToPersonalDatabase()
 
 bool DatabaseManager::switchToGroupDatabase(const QString& groupId)
 {
+    // Закрываем текущее соединение, если оно открыто
     if (m_currentDb.isOpen()) {
         QString connectionName = m_currentDb.connectionName();
         m_currentDb.close();
-        QSqlDatabase::removeDatabase(connectionName);
+        QSqlDatabase::removeDatabase(connectionName);  // Важно: удаляем соединение
     }
 
     QString dbPath = getGroupDbPath(groupId);
-    m_currentDb = QSqlDatabase::addDatabase("QSQLITE", "group_connection_" + groupId);
+    m_currentDb = QSqlDatabase::addDatabase("QSQLITE", "group_connection_" + QUuid::createUuid().toString());
     m_currentDb.setDatabaseName(dbPath);
 
     if (!m_currentDb.open()) {
@@ -202,40 +203,65 @@ bool DatabaseManager::isConnected() const
 
 bool DatabaseManager::registerUser(const QString& username, const QString& password)
 {
-    if (!isConnected()) return false;
+    qDebug() << "=== Регистрация нового пользователя ===";
+    qDebug() << "Проверка подключения к основной БД:" << m_mainDb.isOpen();
 
-    QString trimmedUser = username.trimmed();
-    if (trimmedUser.length() < 3 || trimmedUser.length() > 20) return false;
-    if (password.length() < 6) return false;
-
-    QSqlQuery query(m_mainDb);
-    query.prepare("INSERT INTO users (username, password_hash) VALUES (?, ?)");
-    query.addBindValue(trimmedUser);
-    query.addBindValue(QCryptographicHash::hash(password.toUtf8(), QCryptographicHash::Sha256).toHex());
-
-    if (!query.exec()) {
-        qWarning() << "Registration failed:" << query.lastError();
+    if (!m_mainDb.isOpen()) {
+        qCritical() << "Основная БД не подключена!";
         return false;
     }
 
-    // Получаем ID нового пользователя
-    query.exec("SELECT last_insert_rowid()");
-    if (query.next()) {
-        m_currentUserId = query.value(0).toInt();
-        m_currentUser = trimmedUser;
-        m_loggedIn = true;
+    // Начинаем транзакцию
+    m_mainDb.transaction();
 
-        // Создаем персональную базу данных
-        if (!switchToPersonalDatabase()) {
-            qCritical() << "Failed to create personal database";
+    try {
+        // 1. Создаем запись о пользователе
+        QSqlQuery query(m_mainDb);
+        query.prepare("INSERT INTO users (username, password_hash) VALUES (?, ?)");
+        query.addBindValue(username);
+        query.addBindValue(QCryptographicHash::hash(password.toUtf8(), QCryptographicHash::Sha256).toHex());
+
+        if (!query.exec()) {
+            qCritical() << "Ошибка INSERT в users:" << query.lastError().text();
+            m_mainDb.rollback();
             return false;
         }
 
-        emit loggedIn();
-        return true;
-    }
+        // 2. Получаем ID нового пользователя
+        m_currentUserId = query.lastInsertId().toInt();
+        m_currentUser = username;
+        qDebug() << "Создан пользователь с ID:" << m_currentUserId;
 
-    return false;
+        // 3. Создаем персональную БД
+        QString personalDbPath = getPersonalDbPath();
+        qDebug() << "Путь к персональной БД:" << personalDbPath;
+
+        QFile dbFile(personalDbPath);
+        if (dbFile.exists()) {
+            qWarning() << "Файл персональной БД уже существует! Удаляем...";
+            if (!dbFile.remove()) {
+                qCritical() << "Не удалось удалить существующую БД!";
+                m_mainDb.rollback();
+                return false;
+            }
+        }
+
+        // 4. Переключаемся на персональную БД
+        if (!switchToPersonalDatabase()) {
+            qCritical() << "Ошибка создания персональной БД";
+            m_mainDb.rollback();
+            return false;
+        }
+
+        // Если все успешно - коммитим транзакцию
+        m_mainDb.commit();
+        qDebug() << "Регистрация завершена успешно!";
+        return true;
+    } catch (...) {
+        m_mainDb.rollback();
+        qCritical() << "Исключение при регистрации пользователя";
+        return false;
+    }
 }
 
 bool DatabaseManager::loginUser(const QString& username, const QString& password)
@@ -610,22 +636,37 @@ QStringList DatabaseManager::getGroupMembers(const QString& groupId) const
 // Методы для работы с заметками
 bool DatabaseManager::saveNote(const QString& content)
 {
-    if (!isConnected() || !isLoggedIn()) return false;
+    if (!isConnected() || !isLoggedIn()) {
+        qWarning() << "Cannot save note - not connected or not logged in";
+        return false;
+    }
 
     QSqlQuery query(m_currentDb);
 
     if (m_currentDbMode == PersonalDb) {
-        query.prepare("INSERT INTO notes (content) VALUES (?)");
+        if (!query.prepare("INSERT INTO notes (content) VALUES (:content)")) {
+            qCritical() << "Prepare error:" << query.lastError().text();
+            return false;
+        }
+        query.bindValue(":content", content);
     } else {
-        query.prepare("INSERT INTO notes (user_id, content) VALUES (?, ?)");
-        query.addBindValue(m_currentUserId);
+        if (!query.prepare("INSERT INTO notes (user_id, content) VALUES (:user_id, :content)")) {
+            qCritical() << "Prepare error:" << query.lastError().text();
+            return false;
+        }
+        query.bindValue(":user_id", m_currentUserId);
+        query.bindValue(":content", content);
     }
 
-    query.addBindValue(content);
+    if (!query.exec()) {
+        qCritical() << "Execute error:" << query.lastError().text();
+        qDebug() << "Query:" << query.lastQuery();
+        qDebug() << "Bound values:" << query.boundValues();
+        return false;
+    }
 
-    bool success = query.exec();
-    if (success) emit notesUpdated();
-    return success;
+    emit notesUpdated();
+    return true;
 }
 
 QList<QMap<QString, QVariant>> DatabaseManager::getNotes() const
