@@ -7,7 +7,8 @@
 #include <QFile>
 #include <QDate>
 #include <QTime>
-
+#include <QSqlError> // Добавляем этот заголовочный файл
+#include <QUuid>     // Добавляем для генерации UUID
 DatabaseManager& DatabaseManager::instance()
 {
     static DatabaseManager instance;
@@ -15,78 +16,188 @@ DatabaseManager& DatabaseManager::instance()
 }
 
 DatabaseManager::DatabaseManager(QObject *parent) :
-    QObject(parent), m_loggedIn(false), m_currentUserId(-1)
+    QObject(parent), m_loggedIn(false), m_currentUserId(-1), m_currentDbMode(PersonalDb)
+{
+    // Удаляем все таблицы перед инициализацией
+    dropAllTables();
+
+    initializeMainDatabase();
+
+    if (m_loggedIn) {
+        switchToPersonalDatabase();
+    }
+}
+
+DatabaseManager::~DatabaseManager()
+{
+    if (m_mainDb.isOpen()) {
+        m_mainDb.close();
+    }
+    if (m_currentDb.isOpen()) {
+        m_currentDb.close();
+    }
+}
+
+void DatabaseManager::dropAllTables()
+{
+    // Удаляем файлы всех баз данных
+    QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir dbDir(dbPath);
+
+    // Удаляем основную базу
+    if (QFile::exists(dbPath + "/todo_app_main.db")) {
+        QFile::remove(dbPath + "/todo_app_main.db");
+    }
+
+    // Удаляем персональные базы
+    QStringList personalDbs = dbDir.entryList(QStringList() << "user_*.db", QDir::Files);
+    for (const QString &dbName : personalDbs) {
+        QFile::remove(dbPath + "/" + dbName);
+    }
+
+    // Удаляем групповые базы
+    QStringList groupDbs = dbDir.entryList(QStringList() << "group_*.db", QDir::Files);
+    for (const QString &dbName : groupDbs) {
+        QFile::remove(dbPath + "/" + dbName);
+    }
+
+    // Создаем директорию заново
+    QDir().mkpath(dbPath);
+}
+
+void DatabaseManager::initializeMainDatabase()
 {
     QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(dbPath);
-    dbPath += "/todo_app.db";
+    dbPath += "/todo_app_main.db";
 
+    m_mainDb = QSqlDatabase::addDatabase("QSQLITE", "main_connection");
+    m_mainDb.setDatabaseName(dbPath);
 
-
-    m_db = QSqlDatabase::addDatabase("QSQLITE");
-    m_db.setDatabaseName(dbPath);
-
-    if (!m_db.open()) {
-        qCritical() << "Database connection error:" << m_db.lastError().text();
+    if (!m_mainDb.open()) {
+        qCritical() << "Main database connection error:" << m_mainDb.lastError().text();
         return;
     }
 
-    initializeDatabase();
-}
-
-void DatabaseManager::initializeDatabase()
-{
-    QSqlQuery query;
-
-    // Включаем поддержку внешних ключей
+    QSqlQuery query(m_mainDb);
     query.exec("PRAGMA foreign_keys = ON");
 
-    // Создаем таблицы
-    QStringList tables = {
-        // Пользователи
-        "CREATE TABLE IF NOT EXISTS users ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "username TEXT UNIQUE NOT NULL,"
-        "password_hash TEXT NOT NULL)",
+    // Создаем таблицы пользователей и групп
+    query.exec("CREATE TABLE IF NOT EXISTS users ("
+               "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+               "username TEXT UNIQUE NOT NULL,"
+               "password_hash TEXT NOT NULL,"
+               "group_id TEXT)");
 
-        // Группы
-        "CREATE TABLE IF NOT EXISTS groups ("
-        "id TEXT PRIMARY KEY,"
-        "name TEXT NOT NULL)",
+    query.exec("CREATE TABLE IF NOT EXISTS groups ("
+               "id TEXT PRIMARY KEY,"
+               "name TEXT NOT NULL)");
+}
 
-        // Связь пользователей с группами
-        "ALTER TABLE users ADD COLUMN group_id TEXT REFERENCES groups(id) ON DELETE SET NULL",
+// ... Остальные методы остаются без изменений ...
+// (Все остальные методы из вашего исходного кода должны быть сохранены как есть)
 
-        // Задачи
-        "CREATE TABLE IF NOT EXISTS tasks ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "user_id INTEGER NOT NULL,"
-        "text TEXT NOT NULL,"
-        "date TEXT,"
-        "time TEXT,"
-        "tag TEXT,"
-        "completed BOOLEAN DEFAULT 0,"
-        "FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)",
+bool DatabaseManager::switchToPersonalDatabase()
+{
+    if (m_currentDb.isOpen()) {
+        QString connectionName = m_currentDb.connectionName();
+        m_currentDb.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
 
-        // Заметки
-        "CREATE TABLE IF NOT EXISTS notes ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "user_id INTEGER NOT NULL,"
-        "content TEXT NOT NULL,"
-        "created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
-        "FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)"
-    };
+    QString dbPath = getPersonalDbPath();
+    m_currentDb = QSqlDatabase::addDatabase("QSQLITE", "personal_connection");
+    m_currentDb.setDatabaseName(dbPath);
 
-    for (const QString &table : tables) {
-        if (!query.exec(table)) {
-            qCritical() << "Table creation failed:" << query.lastError().text();
-        }
+    if (!m_currentDb.open()) {
+        qCritical() << "Personal database connection error:" << m_currentDb.lastError().text();
+        return false;
+    }
+
+    initializeCurrentDatabase();
+    m_currentDbMode = PersonalDb;
+    return true;
+}
+
+bool DatabaseManager::switchToGroupDatabase(const QString& groupId)
+{
+    if (m_currentDb.isOpen()) {
+        QString connectionName = m_currentDb.connectionName();
+        m_currentDb.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    QString dbPath = getGroupDbPath(groupId);
+    m_currentDb = QSqlDatabase::addDatabase("QSQLITE", "group_connection_" + groupId);
+    m_currentDb.setDatabaseName(dbPath);
+
+    if (!m_currentDb.open()) {
+        qCritical() << "Group database connection error:" << m_currentDb.lastError().text();
+        return false;
+    }
+
+    initializeCurrentDatabase();
+    m_currentDbMode = GroupDb;
+    return true;
+}
+
+QString DatabaseManager::getPersonalDbPath() const
+{
+    QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    dbPath += QString("/user_%1.db").arg(m_currentUserId);
+    return dbPath;
+}
+
+QString DatabaseManager::getGroupDbPath(const QString& groupId) const
+{
+    QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    dbPath += QString("/group_%1.db").arg(groupId);
+    return dbPath;
+}
+
+void DatabaseManager::initializeCurrentDatabase()
+{
+    QSqlQuery query(m_currentDb);
+    query.exec("PRAGMA foreign_keys = ON");
+
+    if (m_currentDbMode == PersonalDb) {
+        // Персональные таблицы
+        query.exec("CREATE TABLE IF NOT EXISTS tasks ("
+                   "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                   "text TEXT NOT NULL,"
+                   "date TEXT,"
+                   "time TEXT,"
+                   "tag TEXT,"
+                   "completed BOOLEAN DEFAULT 0)");
+
+        query.exec("CREATE TABLE IF NOT EXISTS notes ("
+                   "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                   "content TEXT NOT NULL,"
+                   "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)");
+    } else {
+        // Групповые таблицы
+        query.exec("CREATE TABLE IF NOT EXISTS tasks ("
+                   "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                   "user_id INTEGER NOT NULL,"
+                   "text TEXT NOT NULL,"
+                   "date TEXT,"
+                   "time TEXT,"
+                   "tag TEXT,"
+                   "completed BOOLEAN DEFAULT 0,"
+                   "FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)");
+
+        query.exec("CREATE TABLE IF NOT EXISTS notes ("
+                   "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                   "user_id INTEGER NOT NULL,"
+                   "content TEXT NOT NULL,"
+                   "created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                   "FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)");
     }
 }
 
 bool DatabaseManager::isConnected() const
 {
-    return m_db.isOpen();
+    return m_mainDb.isOpen() && m_currentDb.isOpen();
 }
 
 bool DatabaseManager::registerUser(const QString& username, const QString& password)
@@ -97,19 +208,41 @@ bool DatabaseManager::registerUser(const QString& username, const QString& passw
     if (trimmedUser.length() < 3 || trimmedUser.length() > 20) return false;
     if (password.length() < 6) return false;
 
-    QSqlQuery query;
+    QSqlQuery query(m_mainDb);
     query.prepare("INSERT INTO users (username, password_hash) VALUES (?, ?)");
     query.addBindValue(trimmedUser);
     query.addBindValue(QCryptographicHash::hash(password.toUtf8(), QCryptographicHash::Sha256).toHex());
 
-    return query.exec();
+    if (!query.exec()) {
+        qWarning() << "Registration failed:" << query.lastError();
+        return false;
+    }
+
+    // Получаем ID нового пользователя
+    query.exec("SELECT last_insert_rowid()");
+    if (query.next()) {
+        m_currentUserId = query.value(0).toInt();
+        m_currentUser = trimmedUser;
+        m_loggedIn = true;
+
+        // Создаем персональную базу данных
+        if (!switchToPersonalDatabase()) {
+            qCritical() << "Failed to create personal database";
+            return false;
+        }
+
+        emit loggedIn();
+        return true;
+    }
+
+    return false;
 }
 
 bool DatabaseManager::loginUser(const QString& username, const QString& password)
 {
     if (!isConnected()) return false;
 
-    QSqlQuery query;
+    QSqlQuery query(m_mainDb);
     query.prepare("SELECT id, password_hash, group_id FROM users WHERE username = ?");
     query.addBindValue(username.trimmed());
 
@@ -117,11 +250,26 @@ bool DatabaseManager::loginUser(const QString& username, const QString& password
 
     m_currentUserId = query.value(0).toInt();
     QString storedHash = query.value(1).toString();
+    QString groupId = query.value(2).toString();
 
     if (QCryptographicHash::hash(password.toUtf8(), QCryptographicHash::Sha256).toHex() == storedHash) {
         m_loggedIn = true;
         m_currentUser = username.trimmed();
-        m_currentUserGroup = query.value(2).toString();
+
+        // Переключаемся на соответствующую базу данных
+        if (!groupId.isEmpty()) {
+            if (!switchToGroupDatabase(groupId)) {
+                qCritical() << "Failed to switch to group database";
+                return false;
+            }
+            m_currentUserGroup = groupId;
+        } else {
+            if (!switchToPersonalDatabase()) {
+                qCritical() << "Failed to switch to personal database";
+                return false;
+            }
+        }
+
         emit loggedIn();
         return true;
     }
@@ -130,17 +278,24 @@ bool DatabaseManager::loginUser(const QString& username, const QString& password
 
 void DatabaseManager::logout()
 {
+    if (m_currentDb.isOpen()) {
+        QString connectionName = m_currentDb.connectionName();
+        m_currentDb.close();
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
     m_loggedIn = false;
     m_currentUser.clear();
     m_currentUserGroup.clear();
     m_currentUserId = -1;
+    m_currentDbMode = PersonalDb;
+
     emit loggedOut();
 }
 
 bool DatabaseManager::isLoggedIn() const { return m_loggedIn; }
 QString DatabaseManager::currentUser() const { return m_currentUser; }
 QString DatabaseManager::currentUserGroup() const { return m_currentUserGroup; }
-QSqlError DatabaseManager::lastError() const { return m_db.lastError(); }
 
 // Методы для работы с задачами
 bool DatabaseManager::saveTask(const QString& text, const QDate& date, const QTime& time,
@@ -148,10 +303,17 @@ bool DatabaseManager::saveTask(const QString& text, const QDate& date, const QTi
 {
     if (!isConnected() || !isLoggedIn()) return false;
 
-    QSqlQuery query;
-    query.prepare("INSERT INTO tasks (user_id, text, date, time, tag, completed) "
-                  "VALUES (?, ?, ?, ?, ?, ?)");
-    query.addBindValue(m_currentUserId);
+    QSqlQuery query(m_currentDb);
+
+    if (m_currentDbMode == PersonalDb) {
+        query.prepare("INSERT INTO tasks (text, date, time, tag, completed) "
+                      "VALUES (?, ?, ?, ?, ?)");
+    } else {
+        query.prepare("INSERT INTO tasks (user_id, text, date, time, tag, completed) "
+                      "VALUES (?, ?, ?, ?, ?, ?)");
+        query.addBindValue(m_currentUserId);
+    }
+
     query.addBindValue(text);
     query.addBindValue(date.isValid() ? date.toString(Qt::ISODate) : QVariant());
     query.addBindValue(time.isValid() ? time.toString("HH:mm") : QVariant());
@@ -168,10 +330,16 @@ QList<QMap<QString, QVariant>> DatabaseManager::getTasks() const
     QList<QMap<QString, QVariant>> tasks;
     if (!isConnected() || !isLoggedIn()) return tasks;
 
-    QSqlQuery query;
-    query.prepare("SELECT id, text, date, time, tag, completed FROM tasks "
-                  "WHERE user_id = ? ORDER BY date, time");
-    query.addBindValue(m_currentUserId);
+    QSqlQuery query(m_currentDb);
+
+    if (m_currentDbMode == PersonalDb) {
+        query.prepare("SELECT id, text, date, time, tag, completed FROM tasks "
+                      "ORDER BY date, time");
+    } else {
+        query.prepare("SELECT id, text, date, time, tag, completed FROM tasks "
+                      "WHERE user_id = ? ORDER BY date, time");
+        query.addBindValue(m_currentUserId);
+    }
 
     if (query.exec()) {
         while (query.next()) {
@@ -200,16 +368,24 @@ bool DatabaseManager::updateTask(int taskId, const QMap<QString, QVariant>& upda
         values.append(it.value());
     }
 
-    QSqlQuery query;
-    query.prepare("UPDATE tasks SET " + fields.join(", ") +
-                  " WHERE id = ? AND user_id = ?");
+    QSqlQuery query(m_currentDb);
+    QString queryStr = "UPDATE tasks SET " + fields.join(", ") + " WHERE id = ?";
+
+    if (m_currentDbMode == GroupDb) {
+        queryStr += " AND user_id = ?";
+    }
+
+    query.prepare(queryStr);
 
     for (const QVariant& value : values) {
         query.addBindValue(value);
     }
 
     query.addBindValue(taskId);
-    query.addBindValue(m_currentUserId);
+
+    if (m_currentDbMode == GroupDb) {
+        query.addBindValue(m_currentUserId);
+    }
 
     bool success = query.exec();
     if (success) emit tasksUpdated();
@@ -220,10 +396,16 @@ bool DatabaseManager::removeTask(int taskId)
 {
     if (!isConnected() || !isLoggedIn()) return false;
 
-    QSqlQuery query;
-    query.prepare("DELETE FROM tasks WHERE id = ? AND user_id = ?");
+    QSqlQuery query(m_currentDb);
+
+    if (m_currentDbMode == PersonalDb) {
+        query.prepare("DELETE FROM tasks WHERE id = ?");
+    } else {
+        query.prepare("DELETE FROM tasks WHERE id = ? AND user_id = ?");
+        query.addBindValue(m_currentUserId);
+    }
+
     query.addBindValue(taskId);
-    query.addBindValue(m_currentUserId);
 
     bool success = query.exec();
     if (success) emit tasksUpdated();
@@ -235,9 +417,15 @@ QList<QString> DatabaseManager::getTasksForDate(const QDate& date) const
     QList<QString> tasks;
     if (!isConnected() || !isLoggedIn() || !date.isValid()) return tasks;
 
-    QSqlQuery query;
-    query.prepare("SELECT text FROM tasks WHERE user_id = ? AND date = ?");
-    query.addBindValue(m_currentUserId);
+    QSqlQuery query(m_currentDb);
+
+    if (m_currentDbMode == PersonalDb) {
+        query.prepare("SELECT text FROM tasks WHERE date = ?");
+    } else {
+        query.prepare("SELECT text FROM tasks WHERE user_id = ? AND date = ?");
+        query.addBindValue(m_currentUserId);
+    }
+
     query.addBindValue(date.toString(Qt::ISODate));
 
     if (query.exec()) {
@@ -253,9 +441,14 @@ QList<QString> DatabaseManager::getAvailableTags() const
     QList<QString> tags;
     if (!isConnected() || !isLoggedIn()) return tags;
 
-    QSqlQuery query;
-    query.prepare("SELECT DISTINCT tag FROM tasks WHERE user_id = ? AND tag IS NOT NULL");
-    query.addBindValue(m_currentUserId);
+    QSqlQuery query(m_currentDb);
+
+    if (m_currentDbMode == PersonalDb) {
+        query.prepare("SELECT DISTINCT tag FROM tasks WHERE tag IS NOT NULL");
+    } else {
+        query.prepare("SELECT DISTINCT tag FROM tasks WHERE user_id = ? AND tag IS NOT NULL");
+        query.addBindValue(m_currentUserId);
+    }
 
     if (query.exec()) {
         while (query.next()) {
@@ -271,9 +464,14 @@ QList<QDate> DatabaseManager::getDatesWithTasks() const
     QList<QDate> dates;
     if (!isConnected() || !isLoggedIn()) return dates;
 
-    QSqlQuery query;
-    query.prepare("SELECT DISTINCT date FROM tasks WHERE user_id = ? AND date IS NOT NULL");
-    query.addBindValue(m_currentUserId);
+    QSqlQuery query(m_currentDb);
+
+    if (m_currentDbMode == PersonalDb) {
+        query.prepare("SELECT DISTINCT date FROM tasks WHERE date IS NOT NULL");
+    } else {
+        query.prepare("SELECT DISTINCT date FROM tasks WHERE user_id = ? AND date IS NOT NULL");
+        query.addBindValue(m_currentUserId);
+    }
 
     if (query.exec()) {
         while (query.next()) {
@@ -291,41 +489,74 @@ bool DatabaseManager::createGroup(const QString& groupName, QString &groupCode)
 
     groupCode = QString::number(QRandomGenerator::global()->bounded(100000, 999999));
 
-    QSqlQuery query;
+    // Создаем запись о группе в основной базе
+    QSqlQuery query(m_mainDb);
     query.prepare("INSERT INTO groups (id, name) VALUES (?, ?)");
     query.addBindValue(groupCode);
     query.addBindValue(groupName);
 
     if (!query.exec()) return false;
 
-    query.prepare("UPDATE users SET group_id = ? WHERE id = ?");
-    query.addBindValue(groupCode);
-    query.addBindValue(m_currentUserId);
+    // Создаем отдельную базу данных для группы
+    QString groupDbPath = getGroupDbPath(groupCode);
+    QSqlDatabase groupDb = QSqlDatabase::addDatabase("QSQLITE", "group_" + groupCode);
+    groupDb.setDatabaseName(groupDbPath);
 
-    if (!query.exec()) return false;
+    if (!groupDb.open()) {
+        qCritical() << "Cannot create group database:" << groupDb.lastError();
+        return false;
+    }
 
-    m_currentUserGroup = groupCode;
-    return true;
+    // Инициализируем структуру групповой базы
+    QSqlQuery groupQuery(groupDb);
+    groupQuery.exec("PRAGMA foreign_keys = ON");
+    groupQuery.exec("CREATE TABLE IF NOT EXISTS tasks ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "user_id INTEGER NOT NULL,"
+                    "text TEXT NOT NULL,"
+                    "date TEXT,"
+                    "time TEXT,"
+                    "tag TEXT,"
+                    "completed BOOLEAN DEFAULT 0,"
+                    "FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)");
+
+    groupQuery.exec("CREATE TABLE IF NOT EXISTS notes ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                    "user_id INTEGER NOT NULL,"
+                    "content TEXT NOT NULL,"
+                    "created_at DATETIME DEFAULT CURRENT_TIMESTAMP,"
+                    "FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)");
+
+    groupDb.close();
+
+    // Присоединяем пользователя к группе
+    return joinGroup(groupCode);
 }
 
 bool DatabaseManager::joinGroup(const QString& groupCode)
 {
     if (!isConnected() || !isLoggedIn()) return false;
 
-    QSqlQuery checkQuery;
+    // Проверяем существование группы
+    QSqlQuery checkQuery(m_mainDb);
     checkQuery.prepare("SELECT 1 FROM groups WHERE id = ?");
     checkQuery.addBindValue(groupCode);
 
     if (!checkQuery.exec() || !checkQuery.next()) return false;
 
-    QSqlQuery updateQuery;
+    // Обновляем информацию о группе пользователя
+    QSqlQuery updateQuery(m_mainDb);
     updateQuery.prepare("UPDATE users SET group_id = ? WHERE id = ?");
     updateQuery.addBindValue(groupCode);
     updateQuery.addBindValue(m_currentUserId);
 
     if (!updateQuery.exec()) return false;
 
+    // Переключаемся на групповую базу данных
+    if (!switchToGroupDatabase(groupCode)) return false;
+
     m_currentUserGroup = groupCode;
+    emit groupChanged();
     return true;
 }
 
@@ -333,13 +564,18 @@ bool DatabaseManager::leaveGroup()
 {
     if (!isConnected() || !isLoggedIn() || m_currentUserGroup.isEmpty()) return false;
 
-    QSqlQuery query;
+    // Обновляем информацию о группе пользователя
+    QSqlQuery query(m_mainDb);
     query.prepare("UPDATE users SET group_id = NULL WHERE id = ?");
     query.addBindValue(m_currentUserId);
 
     if (!query.exec()) return false;
 
+    // Переключаемся обратно на персональную базу
+    if (!switchToPersonalDatabase()) return false;
+
     m_currentUserGroup.clear();
+    emit groupChanged();
     return true;
 }
 
@@ -347,7 +583,7 @@ QString DatabaseManager::getGroupName(const QString& groupId) const
 {
     if (!isConnected()) return QString();
 
-    QSqlQuery query;
+    QSqlQuery query(m_mainDb);
     query.prepare("SELECT name FROM groups WHERE id = ?");
     query.addBindValue(groupId);
 
@@ -359,7 +595,7 @@ QStringList DatabaseManager::getGroupMembers(const QString& groupId) const
     QStringList members;
     if (!isConnected()) return members;
 
-    QSqlQuery query;
+    QSqlQuery query(m_mainDb);
     query.prepare("SELECT username FROM users WHERE group_id = ?");
     query.addBindValue(groupId);
 
@@ -376,12 +612,20 @@ bool DatabaseManager::saveNote(const QString& content)
 {
     if (!isConnected() || !isLoggedIn()) return false;
 
-    QSqlQuery query;
-    query.prepare("INSERT INTO notes (user_id, content) VALUES (?, ?)");
-    query.addBindValue(m_currentUserId);
+    QSqlQuery query(m_currentDb);
+
+    if (m_currentDbMode == PersonalDb) {
+        query.prepare("INSERT INTO notes (content) VALUES (?)");
+    } else {
+        query.prepare("INSERT INTO notes (user_id, content) VALUES (?, ?)");
+        query.addBindValue(m_currentUserId);
+    }
+
     query.addBindValue(content);
 
-    return query.exec();
+    bool success = query.exec();
+    if (success) emit notesUpdated();
+    return success;
 }
 
 QList<QMap<QString, QVariant>> DatabaseManager::getNotes() const
@@ -389,9 +633,14 @@ QList<QMap<QString, QVariant>> DatabaseManager::getNotes() const
     QList<QMap<QString, QVariant>> notes;
     if (!isConnected() || !isLoggedIn()) return notes;
 
-    QSqlQuery query;
-    query.prepare("SELECT id, content FROM notes WHERE user_id = ? ORDER BY created_at DESC");
-    query.addBindValue(m_currentUserId);
+    QSqlQuery query(m_currentDb);
+
+    if (m_currentDbMode == PersonalDb) {
+        query.prepare("SELECT id, content FROM notes ORDER BY created_at DESC");
+    } else {
+        query.prepare("SELECT id, content FROM notes WHERE user_id = ? ORDER BY created_at DESC");
+        query.addBindValue(m_currentUserId);
+    }
 
     if (query.exec()) {
         while (query.next()) {
@@ -408,38 +657,48 @@ bool DatabaseManager::updateNote(int noteId, const QString& content)
 {
     if (!isConnected() || !isLoggedIn()) return false;
 
-    QSqlQuery query;
-    query.prepare("UPDATE notes SET content = ? WHERE id = ? AND user_id = ?");
+    QSqlQuery query(m_currentDb);
+
+    if (m_currentDbMode == PersonalDb) {
+        query.prepare("UPDATE notes SET content = ? WHERE id = ?");
+    } else {
+        query.prepare("UPDATE notes SET content = ? WHERE id = ? AND user_id = ?");
+        query.addBindValue(m_currentUserId);
+    }
+
     query.addBindValue(content);
     query.addBindValue(noteId);
-    query.addBindValue(m_currentUserId);
 
-    return query.exec();
+    bool success = query.exec();
+    if (success) emit notesUpdated();
+    return success;
 }
 
 bool DatabaseManager::deleteNote(int noteId)
 {
     if (!isConnected() || !isLoggedIn()) return false;
 
-    QSqlQuery query;
-    query.prepare("DELETE FROM notes WHERE id = ? AND user_id = ?");
-    query.addBindValue(noteId);
-    query.addBindValue(m_currentUserId);
+    QSqlQuery query(m_currentDb);
 
-    return query.exec();
-}
-
-DatabaseManager::~DatabaseManager()
-{
-    if (m_db.isOpen()) {
-        m_db.close();
+    if (m_currentDbMode == PersonalDb) {
+        query.prepare("DELETE FROM notes WHERE id = ?");
+    } else {
+        query.prepare("DELETE FROM notes WHERE id = ? AND user_id = ?");
+        query.addBindValue(m_currentUserId);
     }
+
+    query.addBindValue(noteId);
+
+    bool success = query.exec();
+    if (success) emit notesUpdated();
+    return success;
 }
+
 bool DatabaseManager::userExists(const QString &login) const
 {
     if (!isConnected()) return false;
 
-    QSqlQuery query(m_db);  // Используем m_db вместо m_database
+    QSqlQuery query(m_mainDb);
     query.prepare("SELECT COUNT(*) FROM users WHERE username = ?");
     query.addBindValue(login.trimmed());
 

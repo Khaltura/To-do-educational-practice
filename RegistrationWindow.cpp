@@ -4,6 +4,7 @@
 #include <QMessageBox>
 #include <QVBoxLayout>
 #include <QRegularExpression>
+#include <QSqlError>
 
 RegistrationWindow::RegistrationWindow(QWidget *parent) :
     QDialog(parent),
