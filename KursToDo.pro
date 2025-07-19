@@ -15,6 +15,7 @@ SOURCES += \
     GroupDialog.cpp \
     LoginWindow.cpp \
     MainWindow.cpp \
+    NotesWidget.cpp \
     RegistrationWindow.cpp \
     TaskWidget.cpp \
     User.cpp \

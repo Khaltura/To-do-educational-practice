@@ -1,13 +1,12 @@
-
 #ifndef USERWIDGET_H
 #define USERWIDGET_H
 
 #include <QWidget>
-#include <QListWidget>
 
 class QLabel;
 class QPushButton;
 class QVBoxLayout;
+class QListWidget;
 
 class UserWidget : public QWidget
 {
@@ -16,7 +15,7 @@ public:
     explicit UserWidget(QWidget *parent = nullptr);
     ~UserWidget();
 
-    void updateUI();
+    void updateUI(); // Переносим в public секцию
 
 signals:
     void registrationRequested();
@@ -28,10 +27,14 @@ private slots:
     void handleLeaveGroup();
 
 private:
+    void initUI();
+    void setupConnections();
+    void applyStyles();
+
     QVBoxLayout *m_layout;
     QLabel *m_userLabel;
     QLabel *m_groupLabel;
-    QListWidget *m_membersList; // Новый элемент для списка участников
+    QListWidget *m_membersList;
     QPushButton *m_registerButton;
     QPushButton *m_loginButton;
     QPushButton *m_logoutButton;

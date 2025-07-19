@@ -1,4 +1,3 @@
-
 #ifndef DATABASEMANAGER_H
 #define DATABASEMANAGER_H
 
@@ -12,6 +11,8 @@
 #include <QRandomGenerator>
 #include <QDate>
 #include <QTime>
+#include <QSqlError>
+#include <QUuid>
 
 class DatabaseManager : public QObject
 {
@@ -25,21 +26,21 @@ public:
 
     static DatabaseManager& instance();
 
-    // Методы для работы с режимом БД
+    // Database mode methods
     DbMode currentDbMode() const { return m_currentDbMode; }
     bool isGroupMode() const { return m_currentDbMode == GroupDb; }
 
-    // Основные методы
+    // Core methods
     bool isConnected() const;
     bool registerUser(const QString& username, const QString& password);
     bool loginUser(const QString& username, const QString& password);
     void logout();
-    bool isLoggedIn() const;
-    QString currentUser() const;
-    QString currentUserGroup() const;
+    bool isLoggedIn() const { return m_loggedIn; }
+    QString currentUser() const { return m_currentUser; }
+    QString currentUserGroup() const { return m_currentUserGroup; }
     QSqlError lastError() const;
 
-    // Методы для работы с задачами
+    // Task methods
     bool saveTask(const QString& text, const QDate& date, const QTime& time,
                   const QString& tag, bool completed);
     QList<QMap<QString, QVariant>> getTasks() const;
@@ -49,21 +50,23 @@ public:
     QList<QString> getAvailableTags() const;
     QList<QDate> getDatesWithTasks() const;
 
-    // Методы для работы с заметками
+    // Note methods
     bool saveNote(const QString& content);
     QList<QMap<QString, QVariant>> getNotes() const;
     bool updateNote(int noteId, const QString& content);
     bool deleteNote(int noteId);
 
-    // Методы для работы с группами
-    bool createGroup(const QString& groupName, QString &groupCode);
+    // Group methods
+    bool createGroup(const QString& groupName, QString& groupCode);
     bool joinGroup(const QString& groupCode);
     bool leaveGroup();
     QString getGroupName(const QString& groupId) const;
     QStringList getGroupMembers(const QString& groupId) const;
     bool userExists(const QString &login) const;
+    int currentUserId() const { return m_currentUserId; }
 
-    // Метод для очистки базы данных
+    // Debug methods
+    void debugCheckDatabase();
     void dropAllTables();
 
 signals:
@@ -72,6 +75,7 @@ signals:
     void loggedIn();
     void loggedOut();
     void groupChanged();
+    void notesChanged(const QList<QMap<QString, QVariant>>& notes);
 
 private:
     DatabaseManager(QObject *parent = nullptr);
@@ -84,8 +88,8 @@ private:
     QString getPersonalDbPath() const;
     QString getGroupDbPath(const QString& groupId) const;
 
-    QSqlDatabase m_mainDb;         // Основная база (пользователи и группы)
-    QSqlDatabase m_currentDb;      // Текущая активная база (персональная или групповая)
+    QSqlDatabase m_mainDb;         // Main database (users and groups)
+    QSqlDatabase m_currentDb;      // Current active database (personal or group)
 
     bool m_loggedIn;
     QString m_currentUser;

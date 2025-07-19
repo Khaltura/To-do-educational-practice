@@ -1,4 +1,3 @@
-
 #include "TaskWidget.h"
 #include "DatabaseManager.h"
 #include <QVBoxLayout>

@@ -1,4 +1,3 @@
-
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
@@ -22,7 +21,7 @@ class MainWindow : public QMainWindow
 
 public:
     explicit MainWindow(QWidget *parent = nullptr);
-    ~MainWindow();
+    ~MainWindow() override;
 
 private slots:
     void showRegistrationWindow();
@@ -31,8 +30,11 @@ private slots:
     void handleUserLoggedOut();
 
 private:
+    void setupUI();
     void setupSidePanel();
     void setupMainContent();
+    void connectSignals();
+    void checkInitialAuthState();
 
     // UI Elements
     QWidget *m_sidePanel;
@@ -51,6 +53,11 @@ private:
     // Auth Windows
     RegistrationWindow *m_regWindow;
     LoginWindow *m_loginWindow;
+
+    // Constants
+    static constexpr int WINDOW_WIDTH = 1000;
+    static constexpr int WINDOW_HEIGHT = 600;
+    static constexpr int SIDEBAR_WIDTH = 200;
 };
 
 #endif // MAINWINDOW_H

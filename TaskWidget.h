@@ -1,4 +1,3 @@
-
 #ifndef TASKWIDGET_H
 #define TASKWIDGET_H
 
