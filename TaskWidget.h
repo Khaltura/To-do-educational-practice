@@ -2,41 +2,43 @@
 #define TASKWIDGET_H
 
 #include <QWidget>
-#include <QDate>
-#include <QTime>
-#include <QMap>
-#include <QVariant>
-
-class DatabaseManager;
-class QVBoxLayout;
-class QHBoxLayout;
-class QLineEdit;
-class QLabel;
-class QPushButton;
-class QScrollArea;
-class QCheckBox;
-class QComboBox;
-class QFrame;
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QScrollArea>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QFrame>
+#include <QCalendarWidget>
+#include <QTimeEdit>
+#include <QInputDialog>
+#include <QMessageBox>
+#include <QDebug>
+#include "DatabaseManager.h"
 
 class TaskWidget : public QWidget
 {
     Q_OBJECT
+
 public:
     explicit TaskWidget(DatabaseManager* dbManager, QWidget* parent = nullptr);
     ~TaskWidget();
 
     void setSelectedDate(const QDate& date);
-    void refreshTasks();
-
-    // Новый публичный метод для обработки выхода пользователя
-    void handleUserLoggedOut() { clearTasks(); }
 
 signals:
     void tasksUpdatedForDate(const QDate& date, const QList<QString>& tasks);
 
 private slots:
-    void onTasksUpdated();
+    void refreshTasks();
+    void addTask();
     void filterTasksByTag(const QString& tag);
+    void openDatePopup();
+    void openTimePopup();
+    void openTagPopup();
+    void onTasksUpdated();
 
 private:
     struct TaskItem {
@@ -52,15 +54,10 @@ private:
     };
 
     void setupUI();
-    void addTaskItem(const QMap<QString, QVariant>& taskData);
     void clearTasks();
+    void addTaskItem(const QMap<QString, QVariant>& taskData);
     void updateTagFilter();
-    void openDatePopup();
-    void openTimePopup();
-    void openTagPopup();
-    void addTask();
-    QString formatTaskText(const QString& text, const QString& date,
-                           const QString& time, const QString& tag) const;
+    QString formatTaskText(const QString& text, const QString& date, const QString& time, const QString& tag) const;
 
     DatabaseManager* m_dbManager;
     QVBoxLayout* m_mainLayout;
@@ -74,10 +71,10 @@ private:
     QScrollArea* m_scrollArea;
     QWidget* m_containerWidget;
     QVBoxLayout* m_taskLayout;
+    QList<TaskItem*> m_tasks;
     QDate m_selectedDate;
     QTime m_selectedTime;
     QString m_selectedTag;
-    QList<TaskItem*> m_tasks;
 };
 
 #endif // TASKWIDGET_H

@@ -1,20 +1,4 @@
 #include "TaskWidget.h"
-#include "DatabaseManager.h"
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QLabel>
-#include <QLineEdit>
-#include <QPushButton>
-#include <QScrollArea>
-#include <QCheckBox>
-#include <QComboBox>
-#include <QFrame>
-#include <QCalendarWidget>
-#include <QTimeEdit>
-#include <QInputDialog>
-#include <QMessageBox>
-#include <QDebug>
-#include <QSqlError>
 
 TaskWidget::TaskWidget(DatabaseManager* dbManager, QWidget* parent)
     : QWidget(parent), m_dbManager(dbManager),
@@ -30,10 +14,8 @@ TaskWidget::TaskWidget(DatabaseManager* dbManager, QWidget* parent)
     m_containerWidget(new QWidget),
     m_taskLayout(new QVBoxLayout)
 {
-    // Настройка интерфейса
     setupUI();
 
-    // Подключение сигналов
     connect(m_dbManager, &DatabaseManager::loggedIn, this, &TaskWidget::refreshTasks);
     connect(m_dbManager, &DatabaseManager::loggedOut, this, &TaskWidget::refreshTasks);
     connect(m_dbManager, &DatabaseManager::tasksUpdated, this, &TaskWidget::onTasksUpdated);
@@ -44,74 +26,44 @@ TaskWidget::TaskWidget(DatabaseManager* dbManager, QWidget* parent)
     connect(m_tagBtn, &QPushButton::clicked, this, &TaskWidget::openTagPopup);
     connect(m_addBtn, &QPushButton::clicked, this, &TaskWidget::addTask);
 
-    // Первоначальная загрузка задач
     refreshTasks();
-}
-
-QSqlError DatabaseManager::lastError() const
-{
-    if (m_currentDb.isOpen()) {
-        return m_currentDb.lastError();
-    }
-    return m_mainDb.lastError();
 }
 
 void TaskWidget::setupUI()
 {
-    // Основные настройки layout
     m_mainLayout->setContentsMargins(10, 10, 10, 10);
     m_mainLayout->setSpacing(15);
 
-    // Настройка заголовка
+    // Заголовок
     m_titleLabel->setAlignment(Qt::AlignCenter);
     m_titleLabel->setStyleSheet("font-size: 24px; font-weight: bold; color: #ffffff;");
     m_mainLayout->addWidget(m_titleLabel);
 
-    // Настройка комбобокса фильтра по тегам
+    // Фильтр по тегам
     m_tagFilterCombo->addItem("Все теги");
-    m_tagFilterCombo->setStyleSheet(
-        "QComboBox { font-size: 14px; padding: 4px 8px; background-color: #2d2d2d; color: white; "
-        "border: 1px solid #444; border-radius: 6px; }"
-        "QComboBox:hover { border-color: #0078d7; }"
-        "QComboBox::drop-down { border: none; }");
+    m_tagFilterCombo->setStyleSheet("QComboBox { font-size: 14px; padding: 4px 8px; background-color: #2d2d2d; color: white; border: 1px solid #444; border-radius: 6px; }");
     m_mainLayout->addWidget(m_tagFilterCombo);
 
-    // Layout для ввода задачи
+    // Поле ввода
     QHBoxLayout* inputLayout = new QHBoxLayout;
-    inputLayout->setSpacing(8);
-
-    // Поле ввода задачи
     m_taskInput->setPlaceholderText("Введите новую задачу...");
-    m_taskInput->setStyleSheet(
-        "QLineEdit { background-color: #2d2d2d; color: #ffffff; font-size: 16px; "
-        "padding: 8px 12px; border: 2px solid #444; border-radius: 8px; }"
-        "QLineEdit:focus { border-color: #0078d7; background-color: #333; }"
-        "QLineEdit:hover { border-color: #555; }");
+    m_taskInput->setStyleSheet("QLineEdit { background-color: #2d2d2d; color: #ffffff; font-size: 16px; padding: 8px 12px; border: 2px solid #444; border-radius: 8px; }");
     inputLayout->addWidget(m_taskInput, 1);
 
-    // Кнопки управления
+    // Кнопки
     for (QPushButton* btn : {m_dateBtn, m_timeBtn, m_tagBtn, m_addBtn}) {
         btn->setFixedSize(40, 40);
-        btn->setStyleSheet(
-            "QPushButton { background-color: #2d2d2d; color: white; border: 1px solid #444; "
-            "border-radius: 8px; font-size: 16px; }"
-            "QPushButton:hover { background-color: #3d3d3d; border-color: #0078d7; }"
-            "QPushButton:pressed { background-color: #1d1d1d; }");
+        btn->setStyleSheet("QPushButton { background-color: #2d2d2d; color: white; border: 1px solid #444; border-radius: 8px; font-size: 16px; }");
         inputLayout->addWidget(btn);
     }
-
     m_mainLayout->addLayout(inputLayout);
 
-    // Область с задачами
+    // Список задач
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setStyleSheet("QScrollArea { border: none; background: transparent; }");
-    m_scrollArea->setFrameShape(QFrame::NoFrame);
-
     m_containerWidget->setLayout(m_taskLayout);
     m_taskLayout->setAlignment(Qt::AlignTop);
     m_taskLayout->setSpacing(10);
-    m_taskLayout->setContentsMargins(2, 2, 10, 2);
-
     m_scrollArea->setWidget(m_containerWidget);
     m_mainLayout->addWidget(m_scrollArea);
 }
@@ -123,7 +75,11 @@ void TaskWidget::refreshTasks()
     if (m_dbManager->isLoggedIn()) {
         auto tasks = m_dbManager->getTasks();
         for (const auto& task : tasks) {
-            addTaskItem(task);
+            // В групповом режиме показываем все задачи, в личном - только свои
+            if (m_dbManager->currentDbMode() == DatabaseManager::PersonalDb ||
+                task["user_id"].toInt() == m_dbManager->currentUserId()) {
+                addTaskItem(task);
+            }
         }
         updateTagFilter();
     }
@@ -140,31 +96,30 @@ void TaskWidget::addTaskItem(const QMap<QString, QVariant>& taskData)
 
     QString displayText = formatTaskText(text, date, time, tag);
 
+    // В групповом режиме добавляем автора
+    if (m_dbManager->currentDbMode() == DatabaseManager::GroupDb) {
+        QString author = taskData.value("username", "Вы").toString();
+        displayText += "\n👤 " + author;
+    }
+
     QFrame* taskFrame = new QFrame;
     taskFrame->setFrameShape(QFrame::StyledPanel);
     taskFrame->setStyleSheet("QFrame { background-color: #2d2d2d; border-radius: 8px; padding: 8px; }");
 
     QHBoxLayout* taskLayout = new QHBoxLayout(taskFrame);
     taskLayout->setContentsMargins(5, 5, 5, 5);
-    taskLayout->setSpacing(10);
 
     QCheckBox* checkBox = new QCheckBox;
     checkBox->setChecked(completed);
-    checkBox->setStyleSheet("QCheckBox { spacing: 8px; }");
     taskLayout->addWidget(checkBox);
 
     QLabel* taskLabel = new QLabel(displayText);
-    taskLabel->setStyleSheet(
-        completed ? "color: #888; font-size: 16px; text-decoration: line-through;"
-                  : "color: white; font-size: 16px;");
+    taskLabel->setStyleSheet(completed ? "color: #888; text-decoration: line-through;" : "color: white;");
     taskLabel->setWordWrap(true);
     taskLayout->addWidget(taskLabel, 1);
 
     QLineEdit* taskEdit = new QLineEdit(displayText);
     taskEdit->setVisible(false);
-    taskEdit->setStyleSheet(
-        "QLineEdit { background: #333; color: white; border: 1px solid #555; "
-        "border-radius: 4px; padding: 4px; }");
     taskLayout->addWidget(taskEdit, 1);
 
     QPushButton* editBtn = new QPushButton("✏️");
@@ -173,13 +128,9 @@ void TaskWidget::addTaskItem(const QMap<QString, QVariant>& taskData)
 
     for (QPushButton* btn : {editBtn, saveBtn, removeBtn}) {
         btn->setFixedSize(32, 32);
-        btn->setStyleSheet(
-            "QPushButton { background: transparent; border: none; font-size: 16px; }"
-            "QPushButton:hover { color: #0078d7; }");
+        btn->setStyleSheet("QPushButton { background: transparent; border: none; }");
     }
-
     saveBtn->setVisible(false);
-    saveBtn->setEnabled(false);
 
     taskLayout->addWidget(editBtn);
     taskLayout->addWidget(saveBtn);
@@ -187,19 +138,10 @@ void TaskWidget::addTaskItem(const QMap<QString, QVariant>& taskData)
 
     m_taskLayout->addWidget(taskFrame);
 
-    TaskItem* item = new TaskItem{
-        taskId,
-        taskFrame,
-        checkBox,
-        taskLabel,
-        taskEdit,
-        editBtn,
-        saveBtn,
-        removeBtn,
-        tag
-    };
+    TaskItem* item = new TaskItem{taskId, taskFrame, checkBox, taskLabel, taskEdit, editBtn, saveBtn, removeBtn, tag};
     m_tasks.append(item);
 
+    // Соединения сигналов
     connect(checkBox, &QCheckBox::stateChanged, this, [this, item](int state) {
         QMap<QString, QVariant> updates;
         updates["completed"] = (state == Qt::Checked);
@@ -208,29 +150,21 @@ void TaskWidget::addTaskItem(const QMap<QString, QVariant>& taskData)
 
     connect(editBtn, &QPushButton::clicked, this, [item]() {
         item->label->setVisible(false);
-        item->edit->setText(item->label->text());
         item->edit->setVisible(true);
         item->editBtn->setVisible(false);
         item->saveBtn->setVisible(true);
-        item->saveBtn->setEnabled(true);
     });
 
     connect(saveBtn, &QPushButton::clicked, this, [this, item]() {
-        QString newText = item->edit->text();
-        if (newText.isEmpty()) {
-            QMessageBox::warning(this, "Ошибка", "Задача не может быть пустой!");
-            return;
-        }
-
         QMap<QString, QVariant> updates;
-        updates["text"] = newText;
-        m_dbManager->updateTask(item->id, updates);
-
-        item->label->setText(newText);
-        item->label->setVisible(true);
-        item->edit->setVisible(false);
-        item->editBtn->setVisible(true);
-        item->saveBtn->setVisible(false);
+        updates["text"] = item->edit->text();
+        if (m_dbManager->updateTask(item->id, updates)) {
+            item->label->setText(item->edit->text());
+            item->label->setVisible(true);
+            item->edit->setVisible(false);
+            item->editBtn->setVisible(true);
+            item->saveBtn->setVisible(false);
+        }
     });
 
     connect(removeBtn, &QPushButton::clicked, this, [this, item]() {
@@ -242,6 +176,7 @@ void TaskWidget::addTaskItem(const QMap<QString, QVariant>& taskData)
         }
     });
 }
+
 
 void TaskWidget::clearTasks()
 {
@@ -374,6 +309,16 @@ void TaskWidget::setSelectedDate(const QDate& date)
     }
 }
 
+void TaskWidget::onTasksUpdated()
+{
+    refreshTasks();
+
+    if (m_selectedDate.isValid()) {
+        auto tasks = m_dbManager->getTasksForDate(m_selectedDate);
+        emit tasksUpdatedForDate(m_selectedDate, tasks);
+    }
+}
+
 QString TaskWidget::formatTaskText(const QString& text, const QString& date,
                                    const QString& time, const QString& tag) const
 {
@@ -384,15 +329,8 @@ QString TaskWidget::formatTaskText(const QString& text, const QString& date,
     return result;
 }
 
-void TaskWidget::onTasksUpdated()
-{
-    refreshTasks();
 
-    if (m_selectedDate.isValid()) {
-        auto tasks = m_dbManager->getTasksForDate(m_selectedDate);
-        emit tasksUpdatedForDate(m_selectedDate, tasks);
-    }
-}
+
 
 TaskWidget::~TaskWidget()
 {

@@ -391,10 +391,8 @@ void DatabaseManager::logout()
 }
 
 
-// Методы для работы с задачами
 bool DatabaseManager::saveTask(const QString& text, const QDate& date, const QTime& time,
-                               const QString& tag, bool completed)
-{
+                               const QString& tag, bool completed) {
     if (!isConnected() || !isLoggedIn()) return false;
 
     QSqlQuery query(m_currentDb);
@@ -419,20 +417,22 @@ bool DatabaseManager::saveTask(const QString& text, const QDate& date, const QTi
     return success;
 }
 
-QList<QMap<QString, QVariant>> DatabaseManager::getTasks() const
-{
+QList<QMap<QString, QVariant>> DatabaseManager::getTasks() const {
     QList<QMap<QString, QVariant>> tasks;
-    if (!isConnected() || !isLoggedIn()) return tasks;
+    if (!isConnected()) return tasks;
 
     QSqlQuery query(m_currentDb);
 
     if (m_currentDbMode == PersonalDb) {
-        query.prepare("SELECT id, text, date, time, tag, completed FROM tasks "
-                      "ORDER BY date, time");
+        query.prepare("SELECT id, text, date, time, tag, completed FROM tasks ORDER BY date, time");
     } else {
-        query.prepare("SELECT id, text, date, time, tag, completed FROM tasks "
-                      "WHERE user_id = ? ORDER BY date, time");
-        query.addBindValue(m_currentUserId);
+        // В групповом режиме получаем задачи + имя пользователя
+        query.prepare(
+            "SELECT t.id, t.text, t.date, t.time, t.tag, t.completed, u.username "
+            "FROM tasks t "
+            "LEFT JOIN main.users u ON t.user_id = u.id "
+            "ORDER BY t.date, t.time"
+            );
     }
 
     if (query.exec()) {
@@ -444,9 +444,15 @@ QList<QMap<QString, QVariant>> DatabaseManager::getTasks() const
             task["time"] = query.value(3);
             task["tag"] = query.value(4);
             task["completed"] = query.value(5);
+
+            if (m_currentDbMode == GroupDb) {
+                task["username"] = query.value(6); // Добавляем автора
+            }
+
             tasks.append(task);
         }
     }
+
     return tasks;
 }
 
@@ -833,4 +839,13 @@ bool DatabaseManager::userExists(const QString &login) const
     }
 
     return query.next() && query.value(0).toInt() > 0;
+}
+QSqlError DatabaseManager::lastError() const
+{
+    // Возвращаем ошибку текущей БД, если она открыта
+    if (m_currentDb.isOpen()) {
+        return m_currentDb.lastError();
+    }
+    // Иначе возвращаем ошибку основной БД
+    return m_mainDb.lastError();
 }
