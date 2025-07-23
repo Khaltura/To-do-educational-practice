@@ -197,15 +197,6 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
 {
     if (!item || item->isBeingDeleted) return;
 
-    // Проверка всех указателей
-    Q_ASSERT(item->frame);
-    Q_ASSERT(item->checkBox);
-    Q_ASSERT(item->label);
-    Q_ASSERT(item->edit);
-    Q_ASSERT(item->editBtn);
-    Q_ASSERT(item->saveBtn);
-    Q_ASSERT(item->removeBtn);
-
     // 1. Обработка изменения состояния чекбокса
     item->connections << connect(item->checkBox, &QCheckBox::stateChanged,
                                  this, [this, item](int state) {
@@ -214,7 +205,6 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
                                      TaskUpdates updates;
                                      updates["completed"] = (state == Qt::Checked);
 
-                                     // Прямой вызов вместо invokeMethod
                                      bool success = m_dbManager->updateTask(item->id, updates);
 
                                      if (success) {
@@ -233,7 +223,10 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
                                      }
                                  });
 
-    // 2. Кнопка редактирования
+    // 2. Кнопка редактирования (только для своих задач в групповом режиме)
+    item->editBtn->setVisible(!m_dbManager->isGroupMode() ||
+                              (m_dbManager->isGroupMode() && item->label->text().contains("\n👤 " + m_dbManager->currentUser())));
+
     item->connections << connect(item->editBtn, &QPushButton::clicked,
                                  this, [item]() {
                                      if (!item || item->isBeingDeleted) return;
@@ -243,7 +236,7 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
                                      item->edit->setFocus();
 
                                      QString fullText = item->label->text();
-                                     QString mainText = fullText.split("  📅")[0].trimmed();
+                                     QString mainText = fullText.split("\n👤")[0].split("  📅")[0].trimmed();
                                      item->edit->setText(mainText);
 
                                      item->editBtn->setVisible(false);
@@ -261,18 +254,14 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
                                          return;
                                      }
 
-                                     auto reply = QMessageBox::question(this, "Подтверждение",
-                                                                        "Сохранить изменения задачи?", QMessageBox::Yes | QMessageBox::No);
-                                     if (reply != QMessageBox::Yes) return;
+                                     TaskUpdates updates;
+                                     updates["text"] = newText;
 
-                                     // Извлекаем существующие метаданные
+                                     // Сохраняем остальные метаданные
                                      QString labelText = item->label->text();
                                      QRegularExpression dateRegex("📅 (\\d{4}-\\d{2}-\\d{2})");
                                      QRegularExpression timeRegex("⏱ (\\d{2}:\\d{2})");
-                                     QRegularExpression tagRegex("🏷 (.+)$");
-
-                                     TaskUpdates updates;
-                                     updates["text"] = newText;
+                                     QRegularExpression tagRegex("🏷 (.+?)(?:  |\n|$)");
 
                                      auto dateMatch = dateRegex.match(labelText);
                                      if (dateMatch.hasMatch()) updates["date"] = dateMatch.captured(1);
@@ -283,16 +272,21 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
                                      auto tagMatch = tagRegex.match(labelText);
                                      if (tagMatch.hasMatch()) updates["tag"] = tagMatch.captured(1);
 
-                                     // Прямой вызов вместо invokeMethod
                                      bool success = m_dbManager->updateTask(item->id, updates);
 
                                      if (success) {
-                                         item->label->setText(formatTaskText(
-                                             newText,
-                                             updates.value("date").toString(),
-                                             updates.value("time").toString(),
-                                             updates.value("tag").toString()));
+                                         QString newLabel = formatTaskText(newText,
+                                                                           updates.value("date").toString(),
+                                                                           updates.value("time").toString(),
+                                                                           updates.value("tag").toString());
 
+                                         // Сохраняем информацию об авторе в групповом режиме
+                                         if (m_dbManager->isGroupMode()) {
+                                             QString author = item->label->text().split("\n👤 ").last();
+                                             newLabel += "\n👤 " + author;
+                                         }
+
+                                         item->label->setText(newLabel);
                                          item->label->setVisible(true);
                                          item->edit->setVisible(false);
                                          item->editBtn->setVisible(true);
@@ -302,31 +296,43 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
                                      }
                                  });
 
-    // 4. Кнопка удаления
+    // 4. Кнопка удаления (с проверкой прав в групповом режиме)
+    item->removeBtn->setVisible(!m_dbManager->isGroupMode() ||
+                                (m_dbManager->isGroupMode() && item->label->text().contains("\n👤 " + m_dbManager->currentUser())));
+
     item->connections << connect(item->removeBtn, &QPushButton::clicked,
                                  this, [this, item]() {
                                      if (!item || item->isBeingDeleted) return;
 
-                                     auto reply = QMessageBox::question(this, "Удаление задачи",
-                                                                        "Вы уверены, что хотите удалить эту задачу?",
-                                                                        QMessageBox::Yes | QMessageBox::No);
-                                     if (reply != QMessageBox::Yes) return;
+                                     // Дополнительное подтверждение в групповом режиме
+                                     if (m_dbManager->isGroupMode()) {
+                                         auto reply = QMessageBox::question(this, "Подтверждение удаления",
+                                                                            "Вы уверены, что хотите удалить эту задачу из группы?\n"
+                                                                            "Это действие нельзя отменить.",
+                                                                            QMessageBox::Yes | QMessageBox::No);
+                                         if (reply != QMessageBox::Yes) return;
+                                     }
 
                                      item->isBeingDeleted = true;
                                      item->frame->setEnabled(false);
 
-                                     // Прямой вызов вместо invokeMethod
                                      bool success = m_dbManager->removeTask(item->id);
 
                                      if (success) {
-                                         m_taskLayout->removeWidget(item->frame);
-                                         m_tasks.removeOne(item);
-                                         item->frame->deleteLater();
-                                         delete item;
+                                         // Отложенное удаление для избежания проблем с итераторами
+                                         QTimer::singleShot(0, this, [this, item]() {
+                                             m_taskLayout->removeWidget(item->frame);
+                                             m_tasks.removeOne(item);
+                                             item->frame->deleteLater();
+                                             delete item;
+                                         });
                                      } else {
                                          item->isBeingDeleted = false;
                                          item->frame->setEnabled(true);
-                                         QMessageBox::warning(this, "Ошибка", "Не удалось удалить задачу");
+                                         QMessageBox::warning(this, "Ошибка",
+                                                              m_dbManager->isGroupMode()
+                                                                  ? "Не удалось удалить задачу из группы"
+                                                                  : "Не удалось удалить задачу");
                                      }
                                  });
 
@@ -341,7 +347,7 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
     // 6. Отмена редактирования при потере фокуса
     item->connections << connect(item->edit, &QLineEdit::editingFinished,
                                  this, [item]() {
-                                     if (!item->saveBtn->isVisible()) return;
+                                     if (!item || !item->saveBtn->isVisible()) return;
 
                                      item->label->setVisible(true);
                                      item->edit->setVisible(false);
