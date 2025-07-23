@@ -572,22 +572,25 @@ bool DatabaseManager::updateTask(int taskId, const QMap<QString, QVariant>& upda
 
 bool DatabaseManager::removeTask(int taskId)
 {
-    if (!isConnected() || !isLoggedIn()) return false;
+    QMutexLocker locker(&m_dbMutex); // Добавляем мьютекс для безопасности
 
     QSqlQuery query(m_currentDb);
+    query.prepare("DELETE FROM tasks WHERE id = :id");
+    query.bindValue(":id", taskId);
 
-    if (m_currentDbMode == PersonalDb) {
-        query.prepare("DELETE FROM tasks WHERE id = ?");
-    } else {
-        query.prepare("DELETE FROM tasks WHERE id = ? AND user_id = ?");
-        query.addBindValue(m_currentUserId);
+    if (!query.exec()) {
+        qWarning() << "Ошибка удаления задачи:" << query.lastError().text();
+        return false;
     }
 
-    query.addBindValue(taskId);
+    // Проверяем, действительно ли задача была удалена
+    if (query.numRowsAffected() <= 0) {
+        qWarning() << "Задача не найдена или уже удалена";
+        return false;
+    }
 
-    bool success = query.exec();
-    if (success) emit tasksUpdated();
-    return success;
+    emit tasksUpdated();
+    return true;
 }
 
 QList<QString> DatabaseManager::getTasksForDate(const QDate& date) const

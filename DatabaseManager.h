@@ -14,6 +14,7 @@
 #include <QSqlError>
 #include <QUuid>
 #include <QVariant>
+#include <QMutex>
 
 // Тип для обновлений задач
 using TaskUpdates = QMap<QString, QVariant>;
@@ -109,6 +110,7 @@ private:
     QString m_currentUserGroup;
     int m_currentUserId;
     DbMode m_currentDbMode;
+    mutable QMutex m_dbMutex;
 };
 
 #endif // DATABASEMANAGER_H

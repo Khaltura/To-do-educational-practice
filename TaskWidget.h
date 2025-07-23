@@ -16,6 +16,9 @@
 #include <QList>
 #include <QMetaObject>
 #include <QVariant>
+#include <QFuture>
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
 
 // Предварительное объявление класса DatabaseManager
 class DatabaseManager;

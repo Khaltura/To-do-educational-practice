@@ -6,7 +6,9 @@
 #include <QInputDialog>
 #include <QDialogButtonBox>
 #include <QTimer>
+#include <QApplication>
 #include "DatabaseManager.h"
+
 
 TaskWidget::TaskWidget(DatabaseManager* dbManager, QWidget* parent)
     : QWidget(parent), m_dbManager(dbManager),
@@ -197,6 +199,15 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
 {
     if (!item || item->isBeingDeleted) return;
 
+    // Проверка всех указателей
+    Q_ASSERT(item->frame);
+    Q_ASSERT(item->checkBox);
+    Q_ASSERT(item->label);
+    Q_ASSERT(item->edit);
+    Q_ASSERT(item->editBtn);
+    Q_ASSERT(item->saveBtn);
+    Q_ASSERT(item->removeBtn);
+
     // 1. Обработка изменения состояния чекбокса
     item->connections << connect(item->checkBox, &QCheckBox::stateChanged,
                                  this, [this, item](int state) {
@@ -205,28 +216,57 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
                                      TaskUpdates updates;
                                      updates["completed"] = (state == Qt::Checked);
 
-                                     bool success = m_dbManager->updateTask(item->id, updates);
+                                     // Блокируем интерфейс на время операции
+                                     QApplication::setOverrideCursor(Qt::WaitCursor);
+                                     item->checkBox->setEnabled(false);
 
-                                     if (success) {
-                                         QString style = QString(
-                                                             "QFrame { background-color: #2d2d2d; border-radius: 8px; padding: 8px; "
-                                                             "border-left: 4px solid %1; }").arg(state == Qt::Checked ? "#555555" : "#4CAF50");
+                                     // Используем QFuture для асинхронной операции
+                                     QFuture<bool> future = QtConcurrent::run([this, item, updates]() {
+                                         return m_dbManager->updateTask(item->id, updates);
+                                     });
 
-                                         item->frame->setStyleSheet(style);
-                                         item->label->setStyleSheet(state == Qt::Checked
-                                                                        ? "color: #888; text-decoration: line-through;"
-                                                                        : "color: white;");
-                                     } else {
-                                         QSignalBlocker blocker(item->checkBox);
-                                         item->checkBox->setChecked(!item->checkBox->isChecked());
-                                         QMessageBox::warning(this, "Ошибка", "Не удалось обновить статус задачи");
-                                     }
+                                     QFutureWatcher<bool>* watcher = new QFutureWatcher<bool>();
+                                     watcher->setFuture(future);
+
+                                     connect(watcher, &QFutureWatcher<bool>::finished, this,
+                                             [this, item, state, watcher]() {
+                                                 bool success = watcher->result();
+                                                 watcher->deleteLater();
+
+                                                 QApplication::restoreOverrideCursor();
+                                                 item->checkBox->setEnabled(true);
+
+                                                 if (success) {
+                                                     QString style = QString(
+                                                                         "QFrame { background-color: #2d2d2d; border-radius: 8px; padding: 8px; "
+                                                                         "border-left: 4px solid %1; }").arg(state == Qt::Checked ? "#555555" : "#4CAF50");
+
+                                                     item->frame->setStyleSheet(style);
+                                                     item->label->setStyleSheet(state == Qt::Checked
+                                                                                    ? "color: #888; text-decoration: line-through;"
+                                                                                    : "color: white;");
+                                                 } else {
+                                                     QSignalBlocker blocker(item->checkBox);
+                                                     item->checkBox->setChecked(!item->checkBox->isChecked());
+                                                     QMessageBox::warning(this, "Ошибка",
+                                                                          m_dbManager->isGroupMode()
+                                                                              ? "Не удалось обновить статус задачи. Возможно, она была изменена другим пользователем."
+                                                                              : "Не удалось обновить статус задачи");
+                                                 }
+                                             });
                                  });
 
-    // 2. Кнопка редактирования (только для своих задач в групповом режиме)
-    item->editBtn->setVisible(!m_dbManager->isGroupMode() ||
-                              (m_dbManager->isGroupMode() && item->label->text().contains("\n👤 " + m_dbManager->currentUser())));
+    // 2. Лямбда для обновления видимости кнопок
+    auto updateButtonsVisibility = [this, item]() {
+        bool isEditable = !m_dbManager->isGroupMode() ||
+                          (item->label->text().contains("\n👤 " + m_dbManager->currentUser()));
 
+        item->editBtn->setVisible(isEditable);
+        item->removeBtn->setVisible(isEditable);
+    };
+    updateButtonsVisibility();
+
+    // 3. Кнопка редактирования
     item->connections << connect(item->editBtn, &QPushButton::clicked,
                                  this, [item]() {
                                      if (!item || item->isBeingDeleted) return;
@@ -243,9 +283,9 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
                                      item->saveBtn->setVisible(true);
                                  });
 
-    // 3. Кнопка сохранения
+    // 4. Кнопка сохранения
     item->connections << connect(item->saveBtn, &QPushButton::clicked,
-                                 this, [this, item]() {
+                                 this, [this, item, updateButtonsVisibility]() {
                                      if (!item || item->isBeingDeleted) return;
 
                                      QString newText = item->edit->text().trimmed();
@@ -254,14 +294,18 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
                                          return;
                                      }
 
-                                     TaskUpdates updates;
-                                     updates["text"] = newText;
+                                     // Блокируем интерфейс на время операции
+                                     QApplication::setOverrideCursor(Qt::WaitCursor);
+                                     item->saveBtn->setEnabled(false);
 
-                                     // Сохраняем остальные метаданные
+                                     // Извлекаем существующие метаданные
                                      QString labelText = item->label->text();
                                      QRegularExpression dateRegex("📅 (\\d{4}-\\d{2}-\\d{2})");
                                      QRegularExpression timeRegex("⏱ (\\d{2}:\\d{2})");
                                      QRegularExpression tagRegex("🏷 (.+?)(?:  |\n|$)");
+
+                                     TaskUpdates updates;
+                                     updates["text"] = newText;
 
                                      auto dateMatch = dateRegex.match(labelText);
                                      if (dateMatch.hasMatch()) updates["date"] = dateMatch.captured(1);
@@ -272,71 +316,117 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
                                      auto tagMatch = tagRegex.match(labelText);
                                      if (tagMatch.hasMatch()) updates["tag"] = tagMatch.captured(1);
 
-                                     bool success = m_dbManager->updateTask(item->id, updates);
+                                     // Асинхронное обновление
+                                     QFuture<bool> future = QtConcurrent::run([this, item, updates]() {
+                                         return m_dbManager->updateTask(item->id, updates);
+                                     });
 
-                                     if (success) {
-                                         QString newLabel = formatTaskText(newText,
-                                                                           updates.value("date").toString(),
-                                                                           updates.value("time").toString(),
-                                                                           updates.value("tag").toString());
+                                     QFutureWatcher<bool>* watcher = new QFutureWatcher<bool>();
+                                     watcher->setFuture(future);
 
-                                         // Сохраняем информацию об авторе в групповом режиме
-                                         if (m_dbManager->isGroupMode()) {
-                                             QString author = item->label->text().split("\n👤 ").last();
-                                             newLabel += "\n👤 " + author;
-                                         }
+                                     connect(watcher, &QFutureWatcher<bool>::finished, this,
+                                             [this, item, updates, watcher, updateButtonsVisibility]() {
+                                                 bool success = watcher->result();
+                                                 watcher->deleteLater();
 
-                                         item->label->setText(newLabel);
-                                         item->label->setVisible(true);
-                                         item->edit->setVisible(false);
-                                         item->editBtn->setVisible(true);
-                                         item->saveBtn->setVisible(false);
-                                     } else {
-                                         QMessageBox::warning(this, "Ошибка", "Не удалось сохранить изменения");
-                                     }
+                                                 QApplication::restoreOverrideCursor();
+                                                 item->saveBtn->setEnabled(true);
+
+                                                 if (success) {
+                                                     QString newLabel = formatTaskText(
+                                                         updates["text"].toString(),
+                                                         updates.value("date").toString(),
+                                                         updates.value("time").toString(),
+                                                         updates.value("tag").toString());
+
+                                                     // Сохраняем информацию об авторе в групповом режиме
+                                                     if (m_dbManager->isGroupMode()) {
+                                                         QString author = item->label->text().split("\n👤 ").last();
+                                                         newLabel += "\n👤 " + author;
+                                                     }
+
+                                                     item->label->setText(newLabel);
+                                                     item->label->setVisible(true);
+                                                     item->edit->setVisible(false);
+                                                     item->editBtn->setVisible(true);
+                                                     item->saveBtn->setVisible(false);
+
+                                                     updateButtonsVisibility();
+                                                 } else {
+                                                     QMessageBox::warning(this, "Ошибка",
+                                                                          m_dbManager->isGroupMode()
+                                                                              ? "Не удалось сохранить изменения. Возможно, задача была изменена другим пользователем."
+                                                                              : "Не удалось сохранить изменения");
+                                                 }
+                                             });
                                  });
 
-    // 4. Кнопка удаления (с проверкой прав в групповом режиме)
-    item->removeBtn->setVisible(!m_dbManager->isGroupMode() ||
-                                (m_dbManager->isGroupMode() && item->label->text().contains("\n👤 " + m_dbManager->currentUser())));
-
+    // 5. Кнопка удаления
     item->connections << connect(item->removeBtn, &QPushButton::clicked,
-                                 this, [this, item]() {
+                                 this, [this, item, updateButtonsVisibility]() {
                                      if (!item || item->isBeingDeleted) return;
 
-                                     // Дополнительное подтверждение в групповом режиме
+                                     // Дополнительная проверка для группового режима
                                      if (m_dbManager->isGroupMode()) {
-                                         auto reply = QMessageBox::question(this, "Подтверждение удаления",
-                                                                            "Вы уверены, что хотите удалить эту задачу из группы?\n"
-                                                                            "Это действие нельзя отменить.",
-                                                                            QMessageBox::Yes | QMessageBox::No);
-                                         if (reply != QMessageBox::Yes) return;
+                                         QString currentAuthor = item->label->text().split("\n👤 ").last();
+                                         if (currentAuthor != m_dbManager->currentUser()) {
+                                             QMessageBox::warning(this, "Ошибка прав",
+                                                                  "Вы можете удалять только свои задачи в группе");
+                                             return;
+                                         }
                                      }
 
-                                     item->isBeingDeleted = true;
+                                     auto reply = QMessageBox::question(this, "Подтверждение удаления",
+                                                                        m_dbManager->isGroupMode()
+                                                                            ? "Вы уверены, что хотите удалить эту задачу из группы?\n"
+                                                                              "Это действие нельзя отменить."
+                                                                            : "Вы уверены, что хотите удалить эту задачу?",
+                                                                        QMessageBox::Yes | QMessageBox::No);
+
+                                     if (reply != QMessageBox::Yes) return;
+
+                                     // Блокируем интерфейс на время операции
+                                     QApplication::setOverrideCursor(Qt::WaitCursor);
+                                     item->removeBtn->setEnabled(false);
                                      item->frame->setEnabled(false);
 
-                                     bool success = m_dbManager->removeTask(item->id);
+                                     // Асинхронное удаление
+                                     QFuture<bool> future = QtConcurrent::run([this, item]() {
+                                         return m_dbManager->removeTask(item->id);
+                                     });
 
-                                     if (success) {
-                                         // Отложенное удаление для избежания проблем с итераторами
-                                         QTimer::singleShot(0, this, [this, item]() {
-                                             m_taskLayout->removeWidget(item->frame);
-                                             m_tasks.removeOne(item);
-                                             item->frame->deleteLater();
-                                             delete item;
-                                         });
-                                     } else {
-                                         item->isBeingDeleted = false;
-                                         item->frame->setEnabled(true);
-                                         QMessageBox::warning(this, "Ошибка",
-                                                              m_dbManager->isGroupMode()
-                                                                  ? "Не удалось удалить задачу из группы"
-                                                                  : "Не удалось удалить задачу");
-                                     }
+                                     QFutureWatcher<bool>* watcher = new QFutureWatcher<bool>();
+                                     watcher->setFuture(future);
+
+                                     connect(watcher, &QFutureWatcher<bool>::finished, this,
+                                             [this, item, watcher, updateButtonsVisibility]() {
+                                                 bool success = watcher->result();
+                                                 watcher->deleteLater();
+
+                                                 QApplication::restoreOverrideCursor();
+
+                                                 if (success) {
+                                                     // Отложенное безопасное удаление
+                                                     QTimer::singleShot(0, this, [this, item]() {
+                                                         if (m_tasks.contains(item)) {
+                                                             m_taskLayout->removeWidget(item->frame);
+                                                             m_tasks.removeOne(item);
+                                                             item->frame->deleteLater();
+                                                             delete item;
+                                                         }
+                                                     });
+                                                 } else {
+                                                     item->removeBtn->setEnabled(true);
+                                                     item->frame->setEnabled(true);
+                                                     QMessageBox::warning(this, "Ошибка",
+                                                                          m_dbManager->isGroupMode()
+                                                                              ? "Не удалось удалить задачу. Возможно, она уже была удалена другим пользователем."
+                                                                              : "Не удалось удалить задачу");
+                                                 }
+                                             });
                                  });
 
-    // 5. Обработка нажатия Enter в поле редактирования
+    // 6. Обработка нажатия Enter в поле редактирования
     item->connections << connect(item->edit, &QLineEdit::returnPressed,
                                  this, [this, item]() {
                                      if (item->saveBtn->isVisible()) {
@@ -344,7 +434,7 @@ void TaskWidget::setupTaskItemConnections(TaskItem* item)
                                      }
                                  });
 
-    // 6. Отмена редактирования при потере фокуса
+    // 7. Отмена редактирования при потере фокуса
     item->connections << connect(item->edit, &QLineEdit::editingFinished,
                                  this, [item]() {
                                      if (!item || !item->saveBtn->isVisible()) return;
