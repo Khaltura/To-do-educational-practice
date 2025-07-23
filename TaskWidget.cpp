@@ -75,11 +75,7 @@ void TaskWidget::refreshTasks()
     if (m_dbManager->isLoggedIn()) {
         auto tasks = m_dbManager->getTasks();
         for (const auto& task : tasks) {
-            // В групповом режиме показываем все задачи, в личном - только свои
-            if (m_dbManager->currentDbMode() == DatabaseManager::PersonalDb ||
-                task["user_id"].toInt() == m_dbManager->currentUserId()) {
-                addTaskItem(task);
-            }
+            addTaskItem(task);
         }
         updateTagFilter();
     }
@@ -96,9 +92,8 @@ void TaskWidget::addTaskItem(const QMap<QString, QVariant>& taskData)
 
     QString displayText = formatTaskText(text, date, time, tag);
 
-    // В групповом режиме добавляем автора
     if (m_dbManager->currentDbMode() == DatabaseManager::GroupDb) {
-        QString author = taskData.value("username", "Вы").toString();
+        QString author = taskData.value("username", "Неизвестно").toString();
         displayText += "\n👤 " + author;
     }
 
@@ -118,7 +113,7 @@ void TaskWidget::addTaskItem(const QMap<QString, QVariant>& taskData)
     taskLabel->setWordWrap(true);
     taskLayout->addWidget(taskLabel, 1);
 
-    QLineEdit* taskEdit = new QLineEdit(displayText);
+    QLineEdit* taskEdit = new QLineEdit(text);
     taskEdit->setVisible(false);
     taskLayout->addWidget(taskEdit, 1);
 
@@ -138,10 +133,21 @@ void TaskWidget::addTaskItem(const QMap<QString, QVariant>& taskData)
 
     m_taskLayout->addWidget(taskFrame);
 
-    TaskItem* item = new TaskItem{taskId, taskFrame, checkBox, taskLabel, taskEdit, editBtn, saveBtn, removeBtn, tag};
+    // Создание TaskItem без parent
+    TaskItem* item = new TaskItem{
+        taskId,
+        taskFrame,
+        checkBox,
+        taskLabel,
+        taskEdit,
+        editBtn,
+        saveBtn,
+        removeBtn,
+        tag
+    };
+
     m_tasks.append(item);
 
-    // Соединения сигналов
     connect(checkBox, &QCheckBox::stateChanged, this, [this, item](int state) {
         QMap<QString, QVariant> updates;
         updates["completed"] = (state == Qt::Checked);
@@ -159,7 +165,10 @@ void TaskWidget::addTaskItem(const QMap<QString, QVariant>& taskData)
         QMap<QString, QVariant> updates;
         updates["text"] = item->edit->text();
         if (m_dbManager->updateTask(item->id, updates)) {
-            item->label->setText(item->edit->text());
+            item->label->setText(formatTaskText(item->edit->text(),
+                                                item->label->text().contains("📅") ? item->label->text().split("📅")[1].trimmed().split(" ")[0] : "",
+                                                item->label->text().contains("⏱") ? item->label->text().split("⏱")[1].trimmed().split(" ")[0] : "",
+                                                item->label->text().contains("🏷") ? item->label->text().split("🏷")[1].trimmed() : ""));
             item->label->setVisible(true);
             item->edit->setVisible(false);
             item->editBtn->setVisible(true);
@@ -171,11 +180,19 @@ void TaskWidget::addTaskItem(const QMap<QString, QVariant>& taskData)
         if (m_dbManager->removeTask(item->id)) {
             m_taskLayout->removeWidget(item->frame);
             item->frame->deleteLater();
+            item->label->deleteLater();
+            item->edit->deleteLater();
+            item->checkBox->deleteLater();
+            item->editBtn->deleteLater();
+            item->saveBtn->deleteLater();
+            item->removeBtn->deleteLater();
             m_tasks.removeOne(item);
-            delete item;
+            delete item;  // сам TaskItem удаляем обычным способом
         }
     });
 }
+
+
 
 
 void TaskWidget::clearTasks()
@@ -287,7 +304,9 @@ void TaskWidget::addTask()
         m_selectedTime = QTime();
         m_selectedTag.clear();
     } else {
-        QMessageBox::warning(this, "Ошибка", "Не удалось сохранить задачу: " + m_dbManager->lastError().text());
+        QMessageBox::critical(this, "Ошибка",
+                              QString("Не удалось сохранить задачу:\n%1")
+                                  .arg(m_dbManager->lastError().text()));
     }
 }
 
