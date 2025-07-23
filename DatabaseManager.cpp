@@ -11,6 +11,7 @@
 #include <QSqlError> // Добавляем этот заголовочный файл
 #include <QUuid>     // Добавляем для генерации UUID
 #include <QTextDocument>
+#include <QCoreApplication>
 DatabaseManager& DatabaseManager::instance()
 {
     static DatabaseManager instance;
@@ -20,9 +21,6 @@ DatabaseManager& DatabaseManager::instance()
 DatabaseManager::DatabaseManager(QObject *parent) :
     QObject(parent), m_loggedIn(false), m_currentUserId(-1), m_currentDbMode(PersonalDb)
 {
-    // Удаляем все таблицы перед инициализацией
-    dropAllTables();
-
     initializeMainDatabase();
 
     if (m_loggedIn) {
@@ -40,32 +38,6 @@ DatabaseManager::~DatabaseManager()
     }
 }
 
-void DatabaseManager::dropAllTables()
-{
-    // Удаляем файлы всех баз данных
-    QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir dbDir(dbPath);
-
-    // Удаляем основную базу
-    if (QFile::exists(dbPath + "/todo_app_main.db")) {
-        QFile::remove(dbPath + "/todo_app_main.db");
-    }
-
-    // Удаляем персональные базы
-    QStringList personalDbs = dbDir.entryList(QStringList() << "user_*.db", QDir::Files);
-    for (const QString &dbName : personalDbs) {
-        QFile::remove(dbPath + "/" + dbName);
-    }
-
-    // Удаляем групповые базы
-    QStringList groupDbs = dbDir.entryList(QStringList() << "group_*.db", QDir::Files);
-    for (const QString &dbName : groupDbs) {
-        QFile::remove(dbPath + "/" + dbName);
-    }
-
-    // Создаем директорию заново
-    QDir().mkpath(dbPath);
-}
 
 void DatabaseManager::initializeMainDatabase() {
     QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -103,18 +75,23 @@ void DatabaseManager::initializeMainDatabase() {
 }
 bool DatabaseManager::switchToPersonalDatabase()
 {
+    // Закрываем предыдущее соединение
     if (m_currentDb.isOpen()) {
-        QString connectionName = m_currentDb.connectionName();
+        QSqlQuery finishQuery(m_currentDb); // Завершаем активные запросы
+        finishQuery.finish();
+
+        QString oldConnection = m_currentDb.connectionName();
         m_currentDb.close();
-        QSqlDatabase::removeDatabase(connectionName);
+        QSqlDatabase::removeDatabase(oldConnection);
     }
 
-    QString dbPath = getPersonalDbPath();
-    m_currentDb = QSqlDatabase::addDatabase("QSQLITE", "personal_connection");
-    m_currentDb.setDatabaseName(dbPath);
+    // Создаем новое соединение с уникальным именем
+    QString connectionName = QString("personal_%1").arg(QUuid::createUuid().toString());
+    m_currentDb = QSqlDatabase::addDatabase("QSQLITE", connectionName);
+    m_currentDb.setDatabaseName(getPersonalDbPath());
 
     if (!m_currentDb.open()) {
-        qCritical() << "Personal database connection error:" << m_currentDb.lastError().text();
+        qCritical() << "Ошибка подключения к персональной БД:" << m_currentDb.lastError().text();
         return false;
     }
 
@@ -335,59 +312,78 @@ bool DatabaseManager::registerUser(const QString& username, const QString& passw
     }
 }
 
-bool DatabaseManager::loginUser(const QString& username, const QString& password)
-{
-    if (!isConnected()) return false;
+bool DatabaseManager::loginUser(const QString& username, const QString& password) {
+    // Переподключение, если БД закрыта
+    if (!m_mainDb.isOpen()) {
+        QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/todo_app_main.db";
+        m_mainDb = QSqlDatabase::addDatabase("QSQLITE", "main_reconnect");
+        m_mainDb.setDatabaseName(dbPath);
+        if (!m_mainDb.open()) {
+            qCritical() << "DB open error:" << m_mainDb.lastError();
+            return false;
+        }
+    }
 
+    // Проверка пользователя
     QSqlQuery query(m_mainDb);
-    query.prepare("SELECT id, password_hash, group_id FROM users WHERE username = ?");
+    query.prepare("SELECT id, password_hash FROM users WHERE username = ?");
     query.addBindValue(username.trimmed());
 
-    if (!query.exec() || !query.next()) return false;
-
-    m_currentUserId = query.value(0).toInt();
-    QString storedHash = query.value(1).toString();
-    QString groupId = query.value(2).toString();
-
-    if (QCryptographicHash::hash(password.toUtf8(), QCryptographicHash::Sha256).toHex() == storedHash) {
-        m_loggedIn = true;
-        m_currentUser = username.trimmed();
-
-        // Переключаемся на соответствующую базу данных
-        if (!groupId.isEmpty()) {
-            if (!switchToGroupDatabase(groupId)) {
-                qCritical() << "Failed to switch to group database";
-                return false;
-            }
-            m_currentUserGroup = groupId;
-        } else {
-            if (!switchToPersonalDatabase()) {
-                qCritical() << "Failed to switch to personal database";
-                return false;
-            }
-        }
-
-        emit loggedIn();
-        return true;
+    if (!query.exec() || !query.next()) {
+        qDebug() << "User not found or query error:" << query.lastError();
+        return false;
     }
-    return false;
+
+    // Проверка пароля
+    QString storedHash = query.value(1).toString();
+    QString inputHash = QCryptographicHash::hash(password.trimmed().toUtf8(),
+                                                 QCryptographicHash::Sha256).toHex();
+
+    if (inputHash != storedHash) {
+        qDebug() << "Password mismatch:\nStored:" << storedHash << "\nInput:" << inputHash;
+        return false;
+    }
+
+    // Успешный вход
+    m_currentUserId = query.value(0).toInt();
+    m_currentUser = username.trimmed();
+    m_loggedIn = true;
+
+    // Переключение на персональную БД
+    if (!switchToPersonalDatabase()) {
+        qCritical() << "Failed to switch to personal DB";
+        return false;
+    }
+
+    emit loggedIn();
+    return true;
 }
 
 void DatabaseManager::logout()
 {
+    // Закрываем все активные запросы текущей БД
     if (m_currentDb.isOpen()) {
+        // Создаем временный query объект для завершения операций
+        QSqlQuery query(m_currentDb);
+        query.finish();
+
+        // Даем время на завершение операций
+        QCoreApplication::processEvents();
+
         QString connectionName = m_currentDb.connectionName();
         m_currentDb.close();
         QSqlDatabase::removeDatabase(connectionName);
+        qDebug() << "Закрыто соединение с текущей БД:" << connectionName;
     }
 
+    // Сбрасываем состояние
     m_loggedIn = false;
+    m_currentUserId = -1;
     m_currentUser.clear();
     m_currentUserGroup.clear();
-    m_currentUserId = -1;
-    m_currentDbMode = PersonalDb;
 
     emit loggedOut();
+    qDebug() << "Успешный выход. Текущий ID пользователя:" << m_currentUserId;
 }
 
 
