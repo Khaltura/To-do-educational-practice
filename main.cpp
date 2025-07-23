@@ -1,22 +1,30 @@
-
 #include <QApplication>
 #include <QMessageBox>
 #include <QStandardPaths>
 #include <QDir>
 #include <QDebug>
 #include <QSqlError>
+#include <QMetaType> // Для регистрации типа
+#include <QStyleFactory>
 #include "MainWindow.h"
 #include "DatabaseManager.h"
 
+// Псевдоним (повторная регистрация не нужна)
+using TaskUpdates = QMap<QString, QVariant>;
+
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
+     app.setStyle(QStyleFactory::create("Fusion"));
 
-    // Установка информации о приложении
+    // Зарегистрировать тип для invokeMethod (без Q_DECLARE_METATYPE!)
+    qRegisterMetaType<TaskUpdates>("TaskUpdates");
+
+    // Информация о приложении
     app.setApplicationName("ToDo App");
     app.setApplicationVersion("1.0");
-    app.setOrganizationName("YourCompany");
+    app.setOrganizationName("KKCompany");
 
-    // Глобальный стиль приложения (тёмная тема)
+    // Темная тема
     app.setStyleSheet(R"(
         QWidget {
             background-color: #121212;
@@ -55,10 +63,8 @@ int main(int argc, char *argv[]) {
         }
     )");
 
-    // Получаем экземпляр DatabaseManager
     DatabaseManager& dbManager = DatabaseManager::instance();
 
-    // Проверяем наличие ошибки (альтернатива isConnected)
     if (dbManager.lastError().isValid()) {
         QMessageBox::critical(nullptr, "Ошибка",
                               "Не удалось подключиться к базе данных.\n"

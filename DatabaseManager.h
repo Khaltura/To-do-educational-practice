@@ -13,6 +13,10 @@
 #include <QTime>
 #include <QSqlError>
 #include <QUuid>
+#include <QVariant>
+
+// Тип для обновлений задач
+using TaskUpdates = QMap<QString, QVariant>;
 
 class DatabaseManager : public QObject
 {
@@ -39,13 +43,15 @@ public:
     QString currentUser() const { return m_currentUser; }
     QString currentUserGroup() const { return m_currentUserGroup; }
     QSqlError lastError() const;
+    int currentUserId() const { return m_currentUserId; }
 
-    // Task methods
-    bool saveTask(const QString& text, const QDate& date, const QTime& time,
-                  const QString& tag, bool completed);
+    // Task methods - улучшенный интерфейс для TaskWidget
+    bool saveTask(const QString& text, const QDate& date = QDate(),
+                  const QTime& time = QTime(), const QString& tag = QString(),
+                  bool completed = false);
     QList<QMap<QString, QVariant>> getTasks() const;
-    bool updateTask(int taskId, const QMap<QString, QVariant>& updates);
-    bool removeTask(int taskId);
+    Q_INVOKABLE bool updateTask(int taskId, const TaskUpdates& updates);
+    Q_INVOKABLE bool removeTask(int taskId);
     QList<QString> getTasksForDate(const QDate& date) const;
     QList<QString> getAvailableTags() const;
     QList<QDate> getDatesWithTasks() const;
@@ -63,19 +69,26 @@ public:
     QString getGroupName(const QString& groupId) const;
     QStringList getGroupMembers(const QString& groupId) const;
     bool userExists(const QString &login) const;
-    int currentUserId() const { return m_currentUserId; }
 
     // Debug methods
     void debugCheckDatabase();
     void dropAllTables();
 
 signals:
+    // Улучшенные сигналы для TaskWidget
     void tasksUpdated();
+    void taskUpdateFailed(int taskId);
+    void taskAdded(int taskId);
+    void taskRemoved(int taskId);
+
+    // Существующие сигналы
     void notesUpdated();
     void loggedIn();
     void loggedOut();
     void groupChanged();
     void notesChanged(const QList<QMap<QString, QVariant>>& notes);
+    void taskUpdated(int taskId, bool success);
+    void taskRemoved(int taskId, bool success);
 
 private:
     DatabaseManager(QObject *parent = nullptr);
@@ -88,8 +101,8 @@ private:
     QString getPersonalDbPath() const;
     QString getGroupDbPath(const QString& groupId) const;
 
-    QSqlDatabase m_mainDb;         // Main database (users and groups)
-    QSqlDatabase m_currentDb;      // Current active database (personal or group)
+    QSqlDatabase m_mainDb;
+    QSqlDatabase m_currentDb;
 
     bool m_loggedIn;
     QString m_currentUser;
