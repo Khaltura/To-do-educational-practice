@@ -534,8 +534,7 @@ QList<QMap<QString, QVariant>> DatabaseManager::getTasks() const
 }
 
 
-bool DatabaseManager::updateTask(int taskId, const QMap<QString, QVariant>& updates)
-{
+bool DatabaseManager::updateTask(int taskId, const QMap<QString, QVariant>& updates) {
     if (!isConnected() || !isLoggedIn() || updates.isEmpty()) return false;
 
     QStringList fields;
@@ -549,7 +548,8 @@ bool DatabaseManager::updateTask(int taskId, const QMap<QString, QVariant>& upda
     QSqlQuery query(m_currentDb);
     QString queryStr = "UPDATE tasks SET " + fields.join(", ") + " WHERE id = ?";
 
-    if (m_currentDbMode == GroupDb) {
+    // Для группового режима убираем проверку user_id при обновлении статуса
+    if (m_currentDbMode == GroupDb && !updates.contains("completed")) {
         queryStr += " AND user_id = ?";
     }
 
@@ -561,7 +561,7 @@ bool DatabaseManager::updateTask(int taskId, const QMap<QString, QVariant>& upda
 
     query.addBindValue(taskId);
 
-    if (m_currentDbMode == GroupDb) {
+    if (m_currentDbMode == GroupDb && !updates.contains("completed")) {
         query.addBindValue(m_currentUserId);
     }
 

@@ -1,4 +1,11 @@
 #include "TaskWidget.h"
+#include <QMessageBox>
+#include <QRegularExpression>
+#include <QCalendarWidget>
+#include <QTimeEdit>
+#include <QInputDialog>
+#include <QDialogButtonBox>
+#include <QTimer>
 
 TaskWidget::TaskWidget(DatabaseManager* dbManager, QWidget* parent)
     : QWidget(parent), m_dbManager(dbManager),
@@ -15,18 +22,13 @@ TaskWidget::TaskWidget(DatabaseManager* dbManager, QWidget* parent)
     m_taskLayout(new QVBoxLayout)
 {
     setupUI();
-
-    connect(m_dbManager, &DatabaseManager::loggedIn, this, &TaskWidget::refreshTasks);
-    connect(m_dbManager, &DatabaseManager::loggedOut, this, &TaskWidget::refreshTasks);
-    connect(m_dbManager, &DatabaseManager::tasksUpdated, this, &TaskWidget::onTasksUpdated);
-
-    connect(m_tagFilterCombo, &QComboBox::currentTextChanged, this, &TaskWidget::filterTasksByTag);
-    connect(m_dateBtn, &QPushButton::clicked, this, &TaskWidget::openDatePopup);
-    connect(m_timeBtn, &QPushButton::clicked, this, &TaskWidget::openTimePopup);
-    connect(m_tagBtn, &QPushButton::clicked, this, &TaskWidget::openTagPopup);
-    connect(m_addBtn, &QPushButton::clicked, this, &TaskWidget::addTask);
-
+    setupConnections();
     refreshTasks();
+}
+
+TaskWidget::~TaskWidget()
+{
+    clearTasks();
 }
 
 void TaskWidget::setupUI()
@@ -68,142 +70,286 @@ void TaskWidget::setupUI()
     m_mainLayout->addWidget(m_scrollArea);
 }
 
+void TaskWidget::setupConnections()
+{
+    connect(m_dbManager, &DatabaseManager::loggedIn, this, &TaskWidget::refreshTasks);
+    connect(m_dbManager, &DatabaseManager::loggedOut, this, &TaskWidget::refreshTasks);
+    connect(m_dbManager, &DatabaseManager::tasksUpdated, this, &TaskWidget::onTasksUpdated);
+
+    connect(m_tagFilterCombo, &QComboBox::currentTextChanged, this, &TaskWidget::filterTasksByTag);
+    connect(m_dateBtn, &QPushButton::clicked, this, &TaskWidget::openDatePopup);
+    connect(m_timeBtn, &QPushButton::clicked, this, &TaskWidget::openTimePopup);
+    connect(m_tagBtn, &QPushButton::clicked, this, &TaskWidget::openTagPopup);
+    connect(m_addBtn, &QPushButton::clicked, this, &TaskWidget::addTask);
+}
+
 void TaskWidget::refreshTasks()
 {
+    QString currentFilter = m_tagFilterCombo->currentText();
     clearTasks();
 
     if (m_dbManager->isLoggedIn()) {
         auto tasks = m_dbManager->getTasks();
+
+        // Сначала невыполненные задачи
         for (const auto& task : tasks) {
-            addTaskItem(task);
+            if (!task["completed"].toBool()) {
+                addTaskItem(task);
+            }
         }
+
+        // Затем выполненные
+        for (const auto& task : tasks) {
+            if (task["completed"].toBool()) {
+                addTaskItem(task);
+            }
+        }
+
         updateTagFilter();
+
+        // Восстановление фильтра
+        int idx = m_tagFilterCombo->findText(currentFilter);
+        if (idx >= 0) m_tagFilterCombo->setCurrentIndex(idx);
     }
 }
 
 void TaskWidget::addTaskItem(const QMap<QString, QVariant>& taskData)
 {
-    int taskId = taskData["id"].toInt();
-    QString text = taskData["text"].toString();
-    QString date = taskData["date"].toString();
-    QString time = taskData["time"].toString();
-    QString tag = taskData["tag"].toString();
-    bool completed = taskData["completed"].toBool();
-
-    QString displayText = formatTaskText(text, date, time, tag);
-
-    if (m_dbManager->currentDbMode() == DatabaseManager::GroupDb) {
-        QString author = taskData.value("username", "Неизвестно").toString();
-        displayText += "\n👤 " + author;
+    if (!taskData.contains("id") || !taskData.contains("text")) {
+        qWarning() << "Invalid task data";
+        return;
     }
 
-    QFrame* taskFrame = new QFrame;
-    taskFrame->setFrameShape(QFrame::StyledPanel);
-    taskFrame->setStyleSheet("QFrame { background-color: #2d2d2d; border-radius: 8px; padding: 8px; }");
+    TaskItem* item = new TaskItem;
+    try {
+        // Инициализация данных задачи
+        item->id = taskData["id"].toInt();
+        QString text = taskData["text"].toString();
+        QString date = taskData["date"].toString();
+        QString time = taskData["time"].toString();
+        QString tag = taskData["tag"].toString();
+        bool completed = taskData["completed"].toBool();
+        QString displayText = formatTaskText(text, date, time, tag);
 
-    QHBoxLayout* taskLayout = new QHBoxLayout(taskFrame);
-    taskLayout->setContentsMargins(5, 5, 5, 5);
+        if (m_dbManager->currentDbMode() == DatabaseManager::GroupDb) {
+            QString author = taskData.value("username", "Неизвестно").toString();
+            displayText += "\n👤 " + author;
+        }
 
-    QCheckBox* checkBox = new QCheckBox;
-    checkBox->setChecked(completed);
-    taskLayout->addWidget(checkBox);
+        // Создание виджетов
+        item->frame = new QFrame;
+        item->frame->setFrameShape(QFrame::StyledPanel);
+        item->frame->setStyleSheet(QString(
+                                       "QFrame { background-color: #2d2d2d; border-radius: 8px; padding: 8px; "
+                                       "border-left: 4px solid %1; }"
+                                       ).arg(completed ? "#555555" : "#4CAF50"));
 
-    QLabel* taskLabel = new QLabel(displayText);
-    taskLabel->setStyleSheet(completed ? "color: #888; text-decoration: line-through;" : "color: white;");
-    taskLabel->setWordWrap(true);
-    taskLayout->addWidget(taskLabel, 1);
+        QHBoxLayout* taskLayout = new QHBoxLayout(item->frame);
+        taskLayout->setContentsMargins(5, 5, 5, 5);
 
-    QLineEdit* taskEdit = new QLineEdit(text);
-    taskEdit->setVisible(false);
-    taskLayout->addWidget(taskEdit, 1);
+        item->checkBox = new QCheckBox;
+        item->checkBox->setChecked(completed);
+        taskLayout->addWidget(item->checkBox);
 
-    QPushButton* editBtn = new QPushButton("✏️");
-    QPushButton* saveBtn = new QPushButton("💾");
-    QPushButton* removeBtn = new QPushButton("❌");
+        item->label = new QLabel(displayText);
+        item->label->setStyleSheet(completed ? "color: #888; text-decoration: line-through;" : "color: white;");
+        item->label->setWordWrap(true);
+        taskLayout->addWidget(item->label, 1);
 
-    for (QPushButton* btn : {editBtn, saveBtn, removeBtn}) {
-        btn->setFixedSize(32, 32);
-        btn->setStyleSheet("QPushButton { background: transparent; border: none; }");
+        item->edit = new QLineEdit(text);
+        item->edit->setVisible(false);
+        taskLayout->addWidget(item->edit, 1);
+
+        item->editBtn = new QPushButton("✏️");
+        item->saveBtn = new QPushButton("💾");
+        item->removeBtn = new QPushButton("❌");
+
+        for (QPushButton* btn : {item->editBtn, item->saveBtn, item->removeBtn}) {
+            btn->setFixedSize(32, 32);
+            btn->setStyleSheet("QPushButton { background: transparent; border: none; }");
+        }
+        item->saveBtn->setVisible(false);
+
+        taskLayout->addWidget(item->editBtn);
+        taskLayout->addWidget(item->saveBtn);
+        taskLayout->addWidget(item->removeBtn);
+
+        item->tag = tag;
+
+        // Добавление в layout
+        m_taskLayout->addWidget(item->frame);
+        m_tasks.append(item);
+
+        // Подключение сигналов
+        setupTaskItemConnections(item);
+    } catch (...) {
+        delete item;
+        throw;
     }
-    saveBtn->setVisible(false);
-
-    taskLayout->addWidget(editBtn);
-    taskLayout->addWidget(saveBtn);
-    taskLayout->addWidget(removeBtn);
-
-    m_taskLayout->addWidget(taskFrame);
-
-    // Создание TaskItem без parent
-    TaskItem* item = new TaskItem{
-        taskId,
-        taskFrame,
-        checkBox,
-        taskLabel,
-        taskEdit,
-        editBtn,
-        saveBtn,
-        removeBtn,
-        tag
-    };
-
-    m_tasks.append(item);
-
-    connect(checkBox, &QCheckBox::stateChanged, this, [this, item](int state) {
-        QMap<QString, QVariant> updates;
-        updates["completed"] = (state == Qt::Checked);
-        m_dbManager->updateTask(item->id, updates);
-    });
-
-    connect(editBtn, &QPushButton::clicked, this, [item]() {
-        item->label->setVisible(false);
-        item->edit->setVisible(true);
-        item->editBtn->setVisible(false);
-        item->saveBtn->setVisible(true);
-    });
-
-    connect(saveBtn, &QPushButton::clicked, this, [this, item]() {
-        QMap<QString, QVariant> updates;
-        updates["text"] = item->edit->text();
-        if (m_dbManager->updateTask(item->id, updates)) {
-            item->label->setText(formatTaskText(item->edit->text(),
-                                                item->label->text().contains("📅") ? item->label->text().split("📅")[1].trimmed().split(" ")[0] : "",
-                                                item->label->text().contains("⏱") ? item->label->text().split("⏱")[1].trimmed().split(" ")[0] : "",
-                                                item->label->text().contains("🏷") ? item->label->text().split("🏷")[1].trimmed() : ""));
-            item->label->setVisible(true);
-            item->edit->setVisible(false);
-            item->editBtn->setVisible(true);
-            item->saveBtn->setVisible(false);
-        }
-    });
-
-    connect(removeBtn, &QPushButton::clicked, this, [this, item]() {
-        if (m_dbManager->removeTask(item->id)) {
-            m_taskLayout->removeWidget(item->frame);
-            item->frame->deleteLater();
-            item->label->deleteLater();
-            item->edit->deleteLater();
-            item->checkBox->deleteLater();
-            item->editBtn->deleteLater();
-            item->saveBtn->deleteLater();
-            item->removeBtn->deleteLater();
-            m_tasks.removeOne(item);
-            delete item;  // сам TaskItem удаляем обычным способом
-        }
-    });
 }
 
+void TaskWidget::setupTaskItemConnections(TaskItem* item)
+{
+    // Проверка входных параметров
+    if (!item || item->isBeingDeleted) {
+        qWarning() << "Invalid TaskItem or item is being deleted";
+        return;
+    }
 
+    // Проверка виджетов
+    if (!item->frame || !item->checkBox || !item->label || !item->edit ||
+        !item->editBtn || !item->saveBtn || !item->removeBtn) {
+        qWarning() << "TaskItem widgets are not properly initialized";
+        return;
+    }
 
+    // 1. Соединение для чекбокса
+    item->connections << connect(item->checkBox, &QCheckBox::stateChanged, this,
+                                 [this, item](int state) {
+                                     if (!item || item->isBeingDeleted || !m_tasks.contains(item)) return;
 
+                                     TaskUpdates updates;
+                                     updates["completed"] = (state == Qt::Checked);
+
+                                     bool success = false;
+                                     QMetaObject::invokeMethod(m_dbManager, "updateTask",
+                                                               Qt::BlockingQueuedConnection,
+                                                               Q_RETURN_ARG(bool, success),
+                                                               Q_ARG(int, item->id),
+                                                               Q_ARG(TaskUpdates, updates));
+
+                                     if (success && item && !item->isBeingDeleted) {
+                                         QString style = QString(
+                                                             "QFrame { background-color: #2d2d2d; border-radius: 8px; padding: 8px; "
+                                                             "border-left: 4px solid %1; }"
+                                                             ).arg(state == Qt::Checked ? "#555555" : "#4CAF50");
+
+                                         item->frame->setStyleSheet(style);
+                                         item->label->setStyleSheet(state == Qt::Checked ?
+                                                                        "color: #888; text-decoration: line-through;" : "color: white;");
+                                     }
+                                 });
+
+    // 2. Соединение для кнопки редактирования
+    item->connections << connect(item->editBtn, &QPushButton::clicked, this,
+                                 [item]() {
+                                     if (!item || item->isBeingDeleted) return;
+                                     item->label->setVisible(false);
+                                     item->edit->setVisible(true);
+                                     item->edit->setText(item->label->text().split("  📅")[0].trimmed());
+                                     item->editBtn->setVisible(false);
+                                     item->saveBtn->setVisible(true);
+                                 });
+
+    // 3. Соединение для кнопки сохранения
+    item->connections << connect(item->saveBtn, &QPushButton::clicked, this,
+                                 [this, item]() {
+                                     if (!item || item->isBeingDeleted || !m_tasks.contains(item)) return;
+
+                                     QString newText = item->edit->text().trimmed();
+                                     if (newText.isEmpty()) {
+                                         QMessageBox::warning(this, "Ошибка", "Текст задачи не может быть пустым!");
+                                         return;
+                                     }
+
+                                     TaskUpdates updates;
+                                     updates["text"] = newText;
+
+                                     // Парсим существующие метаданные
+                                     QString labelText = item->label->text();
+                                     QRegularExpression dateRegex("📅 (\\d{4}-\\d{2}-\\d{2})");
+                                     QRegularExpression timeRegex("⏱ (\\d{2}:\\d{2})");
+                                     QRegularExpression tagRegex("🏷 (.+)$");
+
+                                     QRegularExpressionMatch dateMatch = dateRegex.match(labelText);
+                                     if (dateMatch.hasMatch()) updates["date"] = dateMatch.captured(1);
+
+                                     QRegularExpressionMatch timeMatch = timeRegex.match(labelText);
+                                     if (timeMatch.hasMatch()) updates["time"] = timeMatch.captured(1);
+
+                                     QRegularExpressionMatch tagMatch = tagRegex.match(labelText);
+                                     if (tagMatch.hasMatch()) updates["tag"] = tagMatch.captured(1);
+
+                                     bool success = false;
+                                     QMetaObject::invokeMethod(m_dbManager, "updateTask",
+                                                               Qt::BlockingQueuedConnection,
+                                                               Q_RETURN_ARG(bool, success),
+                                                               Q_ARG(int, item->id),
+                                                               Q_ARG(TaskUpdates, updates));
+
+                                     if (success && item && !item->isBeingDeleted) {
+                                         item->label->setText(formatTaskText(
+                                             newText,
+                                             updates.value("date").toString(),
+                                             updates.value("time").toString(),
+                                             updates.value("tag").toString()
+                                             ));
+
+                                         item->label->setVisible(true);
+                                         item->edit->setVisible(false);
+                                         item->editBtn->setVisible(true);
+                                         item->saveBtn->setVisible(false);
+                                     }
+                                 });
+
+    // 4. Соединение для кнопки удаления
+    item->connections << connect(item->removeBtn, &QPushButton::clicked, this,
+                                 [this, item]() {
+                                     if (!item || item->isBeingDeleted || !m_tasks.contains(item)) return;
+
+                                     QMessageBox::StandardButton reply = QMessageBox::question(
+                                         this, "Подтверждение",
+                                         "Вы уверены, что хотите удалить эту задачу?",
+                                         QMessageBox::Yes|QMessageBox::No);
+
+                                     if (reply != QMessageBox::Yes) return;
+
+                                     item->isBeingDeleted = true;
+
+                                     // Удаляем из БД
+                                     bool success = false;
+                                     QMetaObject::invokeMethod(m_dbManager, "removeTask",
+                                                               Qt::BlockingQueuedConnection,
+                                                               Q_RETURN_ARG(bool, success),
+                                                               Q_ARG(int, item->id));
+
+                                     if (success) {
+                                         // Удаляем из интерфейса
+                                         m_taskLayout->removeWidget(item->frame);
+                                         m_tasks.removeOne(item);
+                                         item->frame->deleteLater();
+                                         delete item;
+                                     } else {
+                                         item->isBeingDeleted = false;
+                                         QMessageBox::warning(this, "Ошибка", "Не удалось удалить задачу");
+                                     }
+                                 });
+}
 void TaskWidget::clearTasks()
 {
     for (TaskItem* item : m_tasks) {
-        m_taskLayout->removeWidget(item->frame);
-        item->frame->deleteLater();
-        delete item;
+        if (!item) continue;
+
+        item->isBeingDeleted = true;
+
+        // Отключаем все соединения
+        for (const auto& connection : item->connections) {
+            disconnect(connection);
+        }
+        item->connections.clear();
+
+        // Удаляем виджет
+        if (item->frame) {
+            item->frame->deleteLater();
+            item->frame = nullptr;
+        }
     }
+
+    qDeleteAll(m_tasks);
     m_tasks.clear();
 }
+
+
 
 void TaskWidget::updateTagFilter()
 {
@@ -220,6 +366,14 @@ void TaskWidget::updateTagFilter()
 
     int idx = m_tagFilterCombo->findText(currentTag);
     m_tagFilterCombo->setCurrentIndex(idx != -1 ? idx : 0);
+}
+
+void TaskWidget::filterTasksByTag(const QString& tag)
+{
+    for (TaskItem* item : m_tasks) {
+        bool show = (tag == "Все теги") || (item->tag == tag);
+        item->frame->setVisible(show);
+    }
 }
 
 void TaskWidget::openDatePopup()
@@ -310,32 +464,9 @@ void TaskWidget::addTask()
     }
 }
 
-void TaskWidget::filterTasksByTag(const QString& tag)
-{
-    for (TaskItem* item : m_tasks) {
-        bool show = (tag == "Все теги") || (item->tag == tag);
-        item->frame->setVisible(show);
-    }
-}
-
-void TaskWidget::setSelectedDate(const QDate& date)
-{
-    m_selectedDate = date;
-
-    if (date.isValid()) {
-        auto tasks = m_dbManager->getTasksForDate(date);
-        emit tasksUpdatedForDate(date, tasks);
-    }
-}
-
 void TaskWidget::onTasksUpdated()
 {
     refreshTasks();
-
-    if (m_selectedDate.isValid()) {
-        auto tasks = m_dbManager->getTasksForDate(m_selectedDate);
-        emit tasksUpdatedForDate(m_selectedDate, tasks);
-    }
 }
 
 QString TaskWidget::formatTaskText(const QString& text, const QString& date,
@@ -346,12 +477,4 @@ QString TaskWidget::formatTaskText(const QString& text, const QString& date,
     if (!time.isEmpty()) result += "  ⏱ " + time;
     if (!tag.isEmpty()) result += "  🏷 " + tag;
     return result;
-}
-
-
-
-
-TaskWidget::~TaskWidget()
-{
-    clearTasks();
 }
