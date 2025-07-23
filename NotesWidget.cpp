@@ -70,7 +70,6 @@ void NotesWidget::addNote() {
         return;
     }
 
-    // Простой вызов saveNote с одним параметром
     if (!m_dbManager->saveNote(html)) {
         QMessageBox::warning(this, "Ошибка", "Не удалось сохранить заметку");
         return;
@@ -80,72 +79,6 @@ void NotesWidget::addNote() {
     m_attachedImages.clear();
     loadNotes();
 }
-
-void NotesWidget::setupUI() {
-    QVBoxLayout* mainLayout = new QVBoxLayout(this);
-    mainLayout->setContentsMargins(10, 10, 10, 10);
-    mainLayout->setSpacing(10);
-
-    // Заголовок
-    QLabel* title = new QLabel("📝 Заметки", this);
-    title->setAlignment(Qt::AlignCenter);
-    title->setStyleSheet("font-size: 20px; font-weight: bold; color: #333;");
-    mainLayout->addWidget(title);
-
-    // Поле ввода
-    m_noteInput->setPlaceholderText("Введите текст заметки...");
-    m_noteInput->setStyleSheet(
-        "QTextEdit {"
-        "   background: #f8f8f8;"
-        "   border-radius: 5px;"
-        "   padding: 8px;"
-        "   border: 1px solid #ddd;"
-        "   color: #333;"
-        "}"
-        );
-    m_noteInput->setMinimumHeight(100);
-    mainLayout->addWidget(m_noteInput);
-
-    // Панель кнопок
-    QHBoxLayout* btnLayout = new QHBoxLayout();
-    QPushButton* imgBtn = new QPushButton("📌 Изображение", this);
-    QPushButton* listBtn = new QPushButton("• Список", this);
-    QPushButton* addBtn = new QPushButton("➕ Добавить", this);
-    addBtn->setStyleSheet(
-        "QPushButton {"
-        "   background: #4CAF50;"
-        "   color: white;"
-        "   border-radius: 4px;"
-        "   padding: 5px 10px;"
-        "}"
-        "QPushButton:hover { background: #45a049; }"
-        );
-
-    connect(imgBtn, &QPushButton::clicked, this, &NotesWidget::attachImage);
-    connect(listBtn, &QPushButton::clicked, this, &NotesWidget::addBulletedList);
-    connect(addBtn, &QPushButton::clicked, this, &NotesWidget::addNote);
-
-    btnLayout->addWidget(imgBtn);
-    btnLayout->addWidget(listBtn);
-    btnLayout->addStretch();
-    btnLayout->addWidget(addBtn);
-    mainLayout->addLayout(btnLayout);
-
-    // Область с заметками
-    QWidget* container = new QWidget();
-    container->setLayout(m_noteLayout);
-
-    m_scrollArea->setWidget(container);
-    m_scrollArea->setWidgetResizable(true);
-    m_scrollArea->setStyleSheet(
-        "QScrollArea {"
-        "   border: none;"
-        "   background: #f0f0f0;"
-        "}"
-        );
-    mainLayout->addWidget(m_scrollArea);
-}
-
 void NotesWidget::connectSignals() {
     connect(m_dbManager, &DatabaseManager::loggedIn, this, &NotesWidget::loadNotes);
     connect(m_dbManager, &DatabaseManager::loggedOut, this, &NotesWidget::clearNotes);
@@ -160,16 +93,107 @@ QString NotesWidget::getNoteAuthor(const QMap<QString, QVariant>& note) const {
     }
     return "";
 }
+void NotesWidget::setupUI() {
+    QVBoxLayout* mainLayout = new QVBoxLayout(this);
+    mainLayout->setContentsMargins(10, 10, 10, 10);
+    mainLayout->setSpacing(10);
+    setStyleSheet("background-color: #121212; color: #ffffff;");
+
+    // Заголовок
+    QLabel* title = new QLabel("📝 Заметки", this);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet(
+        "QLabel {"
+        "   font-size: 20px;"
+        "   font-weight: bold;"
+        "   color: #ffffff;"
+        "   background-color: transparent;"
+        "}"
+        );
+    mainLayout->addWidget(title);
+
+    // Поле ввода
+    m_noteInput->setPlaceholderText("Введите текст заметки...");
+    m_noteInput->setStyleSheet(
+        "QTextEdit {"
+        "   background-color: #2d2d2d;"
+        "   border: 1px solid #444;"
+        "   border-radius: 5px;"
+        "   padding: 8px;"
+        "   color: #ffffff;"
+        "}"
+        "QScrollBar:vertical {"
+        "   background: #121212;"
+        "}"
+        );
+    m_noteInput->setMinimumHeight(100);
+    mainLayout->addWidget(m_noteInput);
+
+    // Панель кнопок
+    QHBoxLayout* btnLayout = new QHBoxLayout();
+    QPushButton* imgBtn = new QPushButton("📌 Изображение", this);
+    QPushButton* listBtn = new QPushButton("• Список", this);
+    QPushButton* addBtn = new QPushButton("➕ Добавить", this);
+
+    // Стилизация кнопок
+    QString buttonStyle =
+        "QPushButton {"
+        "   background-color: #2d89ef;"
+        "   color: white;"
+        "   border-radius: 8px;"
+        "   padding: 5px 10px;"
+        "   border: none;"
+        "   min-width: 80px;"
+        "}"
+        "QPushButton:hover {"
+        "   background-color: #1e5cb3;"
+        "}"
+        "QPushButton:pressed {"
+        "   background-color: #0c3b7a;"
+        "}";
+
+    imgBtn->setStyleSheet(buttonStyle);
+    listBtn->setStyleSheet(buttonStyle);
+    addBtn->setStyleSheet(buttonStyle);
+
+    connect(imgBtn, &QPushButton::clicked, this, &NotesWidget::attachImage);
+    connect(listBtn, &QPushButton::clicked, this, &NotesWidget::addBulletedList);
+    connect(addBtn, &QPushButton::clicked, this, &NotesWidget::addNote);
+
+    btnLayout->addWidget(imgBtn);
+    btnLayout->addWidget(listBtn);
+    btnLayout->addStretch();
+    btnLayout->addWidget(addBtn);
+    mainLayout->addLayout(btnLayout);
+
+    // Область с заметками
+    QWidget* container = new QWidget();
+    container->setLayout(m_noteLayout);
+    container->setStyleSheet("background-color: transparent;");
+
+    m_scrollArea->setWidget(container);
+    m_scrollArea->setWidgetResizable(true);
+    m_scrollArea->setStyleSheet(
+        "QScrollArea {"
+        "   border: none;"
+        "   background-color: transparent;"
+        "}"
+        "QScrollBar:vertical {"
+        "   background: #121212;"
+        "}"
+        );
+    mainLayout->addWidget(m_scrollArea);
+}
 
 void NotesWidget::createNoteCard(int noteId, const QString& content, const QString& author) {
     QFrame* frame = new QFrame();
     frame->setFrameShape(QFrame::StyledPanel);
     frame->setStyleSheet(
         "QFrame {"
-        "   background: #f5f5f5;"
+        "   background-color: #1e1e1e;"
         "   border-radius: 8px;"
         "   padding: 10px;"
-        "   border: 1px solid #e0e0e0;"
+        "   border: 1px solid #333;"
         "}"
         );
 
@@ -182,9 +206,10 @@ void NotesWidget::createNoteCard(int noteId, const QString& content, const QStri
         QLabel* authorLabel = new QLabel("👤 " + author, frame);
         authorLabel->setStyleSheet(
             "QLabel {"
-            "   color: #666;"
+            "   color: #aaaaaa;"
             "   font-size: 12px;"
             "   font-style: italic;"
+            "   background-color: transparent;"
             "}"
             );
         layout->addWidget(authorLabel);
@@ -196,67 +221,84 @@ void NotesWidget::createNoteCard(int noteId, const QString& content, const QStri
     contentEdit->setReadOnly(true);
     contentEdit->setStyleSheet(
         "QTextEdit {"
-        "   background: transparent;"
+        "   background-color: transparent;"
         "   border: none;"
-        "   color: #333;"
+        "   color: #ffffff;"
         "   font-size: 14px;"
         "}"
         );
-    contentEdit->setMinimumHeight(100);
-    contentEdit->setMaximumHeight(300);
+
+    // Автоматическая высота по содержимому
+    QTextDocument* doc = contentEdit->document();
+    doc->adjustSize();
+    contentEdit->setFixedHeight(doc->size().height() + 10);
+
     layout->addWidget(contentEdit);
 
     // Кнопки действий
     QHBoxLayout* actionLayout = new QHBoxLayout();
     actionLayout->setSpacing(5);
 
-    bool isEditable = author.isEmpty() || author == m_dbManager->currentUser();
-    if (isEditable) {
-        QPushButton* editBtn = new QPushButton("✏️", frame);
-        QPushButton* deleteBtn = new QPushButton("❌", frame);
+    bool isDeletable = (m_dbManager->currentDbMode() == DatabaseManager::GroupDb)
+                           ? (author.isEmpty() || author == m_dbManager->currentUser())
+                           : true;
 
-        editBtn->setStyleSheet(
-            "QPushButton {"
-            "   border: none;"
-            "   background: transparent;"
-            "   font-size: 14px;"
-            "}"
-            "QPushButton:hover { color: #4CAF50; }"
-            );
-
+    if (isDeletable) {
+        QPushButton* deleteBtn = new QPushButton("❌ Удалить", frame);
         deleteBtn->setStyleSheet(
             "QPushButton {"
+            "   background-color: #d9534f;"
+            "   color: white;"
+            "   border-radius: 4px;"
+            "   padding: 3px 8px;"
             "   border: none;"
-            "   background: transparent;"
-            "   font-size: 14px;"
             "}"
-            "QPushButton:hover { color: #f44336; }"
+            "QPushButton:hover {"
+            "   background-color: #c9302c;"
+            "}"
+            "QPushButton:pressed {"
+            "   background-color: #ac2925;"
+            "}"
             );
 
-        connect(editBtn, &QPushButton::clicked, [this, noteId]() {
-            // Реализация редактирования
-        });
+        connect(deleteBtn, &QPushButton::clicked, [this, noteId, author]() {
+            // Проверяем, может ли пользователь удалить эту заметку
+            bool canDelete = (m_dbManager->currentDbMode() == DatabaseManager::PersonalDb) ||
+                             (author.isEmpty() || author == m_dbManager->currentUser());
 
-        connect(deleteBtn, &QPushButton::clicked, [this, noteId]() {
-            if (QMessageBox::question(this, "Удаление", "Удалить заметку?") == QMessageBox::Yes) {
-                if (m_dbManager->deleteNote(noteId)) loadNotes();
+            if (!canDelete) {
+                QMessageBox::warning(this, "Ошибка", "Вы не можете удалить чужую заметку!");
+                return;
+            }
+
+            if (QMessageBox::question(this, "Удаление", "Удалить заметку?",
+                                      QMessageBox::Yes | QMessageBox::No) == QMessageBox::Yes) {
+                if (m_dbManager->deleteNote(noteId)) {
+                    loadNotes();
+                } else {
+                    QMessageBox::warning(this, "Ошибка", "Не удалось удалить заметку,её сделал другой пользователь!");
+                }
             }
         });
 
-        actionLayout->addWidget(editBtn);
         actionLayout->addWidget(deleteBtn);
     }
 
     QPushButton* viewBtn = new QPushButton("🔍 Просмотр", frame);
     viewBtn->setStyleSheet(
         "QPushButton {"
-        "   background: #e0e0e0;"
-        "   color: #333;"
+        "   background-color: #5bc0de;"
+        "   color: white;"
         "   border-radius: 4px;"
         "   padding: 3px 8px;"
-        "   font-size: 12px;"
+        "   border: none;"
         "}"
-        "QPushButton:hover { background: #d0d0d0; }"
+        "QPushButton:hover {"
+        "   background-color: #31b0d5;"
+        "}"
+        "QPushButton:pressed {"
+        "   background-color: #269abc;"
+        "}"
         );
 
     connect(viewBtn, &QPushButton::clicked, [this, content]() {
@@ -274,12 +316,19 @@ void NotesWidget::showNoteDialog(const QString& content) {
     QDialog dialog(this);
     dialog.setWindowTitle("Просмотр заметки");
     dialog.resize(600, 400);
+    dialog.setStyleSheet(
+        "QDialog {"
+        "   background-color: #1e1e1e;"
+        "   color: #ffffff;"
+        "}"
+        );
 
     QTextBrowser* browser = new QTextBrowser(&dialog);
     browser->setHtml(content);
     browser->setStyleSheet(
         "QTextBrowser {"
-        "   background: #f5f5f5;"
+        "   background-color: #1e1e1e;"
+        "   color: #ffffff;"
         "   border: none;"
         "   font-size: 14px;"
         "}"
@@ -289,6 +338,21 @@ void NotesWidget::showNoteDialog(const QString& content) {
     layout->addWidget(browser);
 
     QPushButton* closeBtn = new QPushButton("Закрыть", &dialog);
+    closeBtn->setStyleSheet(
+        "QPushButton {"
+        "   background-color: #5cb85c;"
+        "   color: white;"
+        "   border-radius: 4px;"
+        "   padding: 5px 15px;"
+        "   border: none;"
+        "}"
+        "QPushButton:hover {"
+        "   background-color: #4cae4c;"
+        "}"
+        "QPushButton:pressed {"
+        "   background-color: #398439;"
+        "}"
+        );
     connect(closeBtn, &QPushButton::clicked, &dialog, &QDialog::accept);
 
     QHBoxLayout* btnLayout = new QHBoxLayout();

@@ -16,6 +16,7 @@
 #include <QVariant>
 #include <QMutex>
 
+
 // Тип для обновлений задач
 using TaskUpdates = QMap<QString, QVariant>;
 

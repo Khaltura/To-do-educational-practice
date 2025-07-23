@@ -833,15 +833,24 @@ bool DatabaseManager::saveNote(const QString& content) {
     if (!isConnected()) return false;
 
     QSqlQuery query(m_currentDb);
-    query.prepare("INSERT INTO notes (content) VALUES (?)");
-    query.addBindValue(content);
+    if (m_currentDbMode == PersonalDb) {
+        query.prepare("INSERT INTO notes (content) VALUES (?)");
+        query.addBindValue(content);
+    } else {
+        query.prepare("INSERT INTO notes (content, user_id) VALUES (?, ?)");
+        query.addBindValue(content);
+        query.addBindValue(m_currentUserId); // Убедитесь, что m_currentUserId установлен
+    }
 
     if (!query.exec()) {
         qCritical() << "Ошибка сохранения заметки:" << query.lastError();
         return false;
     }
 
-    emit notesUpdated(); // Уведомляем UI об изменении
+    qDebug() << "Note saved. Mode:" << (m_currentDbMode == PersonalDb ? "Personal" : "Group")
+             << "User ID:" << m_currentUserId << "Last insert ID:" << query.lastInsertId();
+
+    emit notesUpdated();
     return true;
 }
 
@@ -886,24 +895,54 @@ bool DatabaseManager::updateNote(int noteId, const QString& content)
     return success;
 }
 
-bool DatabaseManager::deleteNote(int noteId)
-{
-    if (!isConnected() || !isLoggedIn()) return false;
+bool DatabaseManager::deleteNote(int noteId) {
+    if (!isConnected() || !isLoggedIn()) {
+        qDebug() << "Delete note failed: DB not connected or user not logged in";
+        return false;
+    }
+
+    qDebug() << "Attempting to delete note. ID:" << noteId
+             << "User ID:" << m_currentUserId
+             << "DB mode:" << (m_currentDbMode == PersonalDb ? "Personal" : "Group");
 
     QSqlQuery query(m_currentDb);
+    QString sql;
 
     if (m_currentDbMode == PersonalDb) {
-        query.prepare("DELETE FROM notes WHERE id = ?");
+        sql = "DELETE FROM notes WHERE id = ?";
+        query.prepare(sql);
+        query.addBindValue(noteId);
     } else {
-        query.prepare("DELETE FROM notes WHERE id = ? AND user_id = ?");
+        sql = "DELETE FROM notes WHERE id = ? AND user_id = ?";
+        query.prepare(sql);
+        query.addBindValue(noteId);
         query.addBindValue(m_currentUserId);
     }
 
-    query.addBindValue(noteId);
+    if (!query.exec()) {
+        qCritical() << "Delete note error:" << query.lastError()
+        << "Executed SQL:" << sql;
+        return false;
+    }
 
-    bool success = query.exec();
-    if (success) emit notesUpdated();
-    return success;
+    int affected = query.numRowsAffected();
+    qDebug() << "Delete note query affected" << affected << "rows";
+
+    if (affected > 0) {
+        emit notesUpdated();
+        return true;
+    }
+
+    // Если строк не затронуто, проверим существование заметки
+    query.prepare("SELECT 1 FROM notes WHERE id = ?");
+    query.addBindValue(noteId);
+    if (query.exec() && query.next()) {
+        qDebug() << "Note exists but doesn't belong to current user or other condition failed";
+    } else {
+        qDebug() << "Note with ID" << noteId << "does not exist";
+    }
+
+    return false;
 }
 
 bool DatabaseManager::userExists(const QString &login) const

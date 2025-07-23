@@ -168,7 +168,7 @@ void TaskWidget::addTaskItem(const QMap<QString, QVariant>& taskData)
         taskLayout->addWidget(item->edit, 1);
 
         item->editBtn = new QPushButton("✏️");
-        item->saveBtn = new QPushButton("💾");
+        item->saveBtn = new QPushButton(" ");
         item->removeBtn = new QPushButton("❌");
 
         for (QPushButton* btn : {item->editBtn, item->saveBtn, item->removeBtn}) {
