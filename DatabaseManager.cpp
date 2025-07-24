@@ -40,26 +40,43 @@ DatabaseManager::~DatabaseManager()
 
 QString DatabaseManager::getProjectRootPath() const
 {
-    // Путь к исполняемому файлу
+    // Получаем путь к исполняемому файлу
     QString exePath = QCoreApplication::applicationDirPath();
-
-    // Поднимаемся на 3 уровня вверх из build/debug/release
     QDir dir(exePath);
-    dir.cdUp();
-    dir.cdUp();
-    dir.cdUp();
 
-    return dir.path();
+    // Поднимаемся вверх по папкам, пока не найдем признак корня проекта
+    // (например, папку .git или файл .project)
+    while (!dir.isRoot()) {
+        if (dir.exists(".git") || dir.exists("CMakeLists.txt") ||
+            dir.exists("KursToDo.pro")) {
+            return dir.path();
+        }
+        if (!dir.cdUp()) break;
+    }
+
+    // Если не нашли признаков проекта, возвращаем папку с exe
+    return exePath;
 }
 
 QString DatabaseManager::getDatabaseDirectory() const
 {
-    QString dbDir = getProjectRootPath() + "/KursToDo/databases/";
+    QString dbDir = getProjectRootPath() + "/databases/";
 
+    // Создаем папку, если ее нет
     QDir dir(dbDir);
     if (!dir.exists()) {
-        dir.mkpath(".");
-        qDebug() << "Created database directory:" << dbDir;
+        if (!dir.mkpath(".")) {
+            qCritical() << "Cannot create database directory!";
+            // Fallback - используем папку с exe
+            return QCoreApplication::applicationDirPath() + "/databases/";
+        }
+    }
+
+    // Проверяем права на запись
+    QFile testFile(dbDir + "test_write.tmp");
+    if (!testFile.open(QIODevice::WriteOnly)) {
+        qCritical() << "No write permissions in database directory!";
+        testFile.remove();
     }
 
     return dbDir;
@@ -67,7 +84,6 @@ QString DatabaseManager::getDatabaseDirectory() const
 
 void DatabaseManager::initializeMainDatabase() {
     QString dbPath = getDatabaseDirectory() + "todo_app_main.db";
-
     qDebug() << "Main DB path:" << dbPath;
 
     m_mainDb = QSqlDatabase::addDatabase("QSQLITE", "main_connection");
