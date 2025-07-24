@@ -112,6 +112,7 @@ private:
     int m_currentUserId;
     DbMode m_currentDbMode;
     mutable QMutex m_dbMutex;
+    QString getProjectRootPath() const;
     QString getDatabaseDirectory() const;
 };
 

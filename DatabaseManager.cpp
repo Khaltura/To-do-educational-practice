@@ -38,14 +38,28 @@ DatabaseManager::~DatabaseManager()
     }
 }
 
+QString DatabaseManager::getProjectRootPath() const
+{
+    // Путь к исполняемому файлу
+    QString exePath = QCoreApplication::applicationDirPath();
+
+    // Поднимаемся на 3 уровня вверх из build/debug/release
+    QDir dir(exePath);
+    dir.cdUp();
+    dir.cdUp();
+    dir.cdUp();
+
+    return dir.path();
+}
+
 QString DatabaseManager::getDatabaseDirectory() const
 {
-    QString dbDir = QCoreApplication::applicationDirPath() + "/databases/";
+    QString dbDir = getProjectRootPath() + "/KursToDo/databases/";
 
-    // Создаем папку, если она не существует
     QDir dir(dbDir);
     if (!dir.exists()) {
         dir.mkpath(".");
+        qDebug() << "Created database directory:" << dbDir;
     }
 
     return dbDir;
@@ -54,9 +68,10 @@ QString DatabaseManager::getDatabaseDirectory() const
 void DatabaseManager::initializeMainDatabase() {
     QString dbPath = getDatabaseDirectory() + "todo_app_main.db";
 
+    qDebug() << "Main DB path:" << dbPath;
+
     m_mainDb = QSqlDatabase::addDatabase("QSQLITE", "main_connection");
     m_mainDb.setDatabaseName(dbPath);
-
     if (!m_mainDb.open()) {
         qCritical() << "Main database connection error:" << m_mainDb.lastError().text();
         return;
@@ -215,7 +230,6 @@ QString DatabaseManager::getPersonalDbPath() const
 {
     return getDatabaseDirectory() + QString("user_%1.db").arg(m_currentUserId);
 }
-
 QString DatabaseManager::getGroupDbPath(const QString& groupId) const
 {
     return getDatabaseDirectory() + QString("group_%1.db").arg(groupId);
@@ -265,9 +279,7 @@ void DatabaseManager::initializeCurrentDatabase()
 
     // Для группового режима прикрепляем основную БД
     if (m_currentDbMode == GroupDb) {
-        QString mainDbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/todo_app_main.db";
-        qDebug() << "Попытка подключить основную БД:" << mainDbPath;
-
+        QString mainDbPath = getDatabaseDirectory() + "todo_app_main.db";
         if (!QFile::exists(mainDbPath)) {
             qCritical() << "Файл основной БД не существует по пути:" << mainDbPath;
             return;
