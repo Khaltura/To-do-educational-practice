@@ -38,11 +38,21 @@ DatabaseManager::~DatabaseManager()
     }
 }
 
+QString DatabaseManager::getDatabaseDirectory() const
+{
+    QString dbDir = QCoreApplication::applicationDirPath() + "/databases/";
+
+    // Создаем папку, если она не существует
+    QDir dir(dbDir);
+    if (!dir.exists()) {
+        dir.mkpath(".");
+    }
+
+    return dbDir;
+}
 
 void DatabaseManager::initializeMainDatabase() {
-    QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir().mkpath(dbPath);
-    dbPath += "/todo_app_main.db";
+    QString dbPath = getDatabaseDirectory() + "todo_app_main.db";
 
     m_mainDb = QSqlDatabase::addDatabase("QSQLITE", "main_connection");
     m_mainDb.setDatabaseName(dbPath);
@@ -203,16 +213,12 @@ bool DatabaseManager::switchToGroupDatabase(const QString& groupId) {
 
 QString DatabaseManager::getPersonalDbPath() const
 {
-    QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    dbPath += QString("/user_%1.db").arg(m_currentUserId);
-    return dbPath;
+    return getDatabaseDirectory() + QString("user_%1.db").arg(m_currentUserId);
 }
 
 QString DatabaseManager::getGroupDbPath(const QString& groupId) const
 {
-    QString dbPath = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    dbPath += QString("/group_%1.db").arg(groupId);
-    return dbPath;
+    return getDatabaseDirectory() + QString("group_%1.db").arg(groupId);
 }
 
 void DatabaseManager::initializeCurrentDatabase()
