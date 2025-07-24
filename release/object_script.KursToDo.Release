@@ -2,6 +2,7 @@ release/DatabaseManager.o
 release/GroupDialog.o
 release/LoginWindow.o
 release/MainWindow.o
+release/NetworkManager.o
 release/NotesWidget.o
 release/RegistrationWindow.o
 release/TaskWidget.o
@@ -13,6 +14,7 @@ release/moc_DatabaseManager.o
 release/moc_GroupDialog.o
 release/moc_LoginWindow.o
 release/moc_MainWindow.o
+release/moc_NetworkManager.o
 release/moc_NotesWidget.o
 release/moc_RegistrationWindow.o
 release/moc_TaskWidget.o

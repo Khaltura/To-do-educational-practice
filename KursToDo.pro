@@ -1,6 +1,7 @@
 QT       += core gui
 QT       += widgets
 QT       += core gui sql
+QT       += network
 
 greaterThan(QT_MAJOR_VERSION, 4): QT += widgets
 
@@ -15,6 +16,7 @@ SOURCES += \
     GroupDialog.cpp \
     LoginWindow.cpp \
     MainWindow.cpp \
+    NetworkManager.cpp \
     NotesWidget.cpp \
     RegistrationWindow.cpp \
     TaskWidget.cpp \
@@ -28,6 +30,7 @@ HEADERS += \
     GroupDialog.h \
     LoginWindow.h \
     MainWindow.h \
+    NetworkManager.h \
     NotesWidget.h \
     RegistrationWindow.h \
     TaskWidget.h \

@@ -12,6 +12,7 @@
 #include <QUuid>     // Добавляем для генерации UUID
 #include <QTextDocument>
 #include <QCoreApplication>
+
 DatabaseManager& DatabaseManager::instance()
 {
     static DatabaseManager instance;
@@ -189,6 +190,8 @@ bool DatabaseManager::switchToGroupDatabase(const QString& groupId) {
 
     // Открываем групповую БД
     QString dbPath = getGroupDbPath(groupId);
+
+
     m_currentDb = QSqlDatabase::addDatabase("QSQLITE", "group_connection");
     m_currentDb.setDatabaseName(dbPath);
 

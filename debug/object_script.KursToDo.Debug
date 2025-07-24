@@ -2,6 +2,7 @@ debug/DatabaseManager.o
 debug/GroupDialog.o
 debug/LoginWindow.o
 debug/MainWindow.o
+debug/NetworkManager.o
 debug/NotesWidget.o
 debug/RegistrationWindow.o
 debug/TaskWidget.o
@@ -13,6 +14,7 @@ debug/moc_DatabaseManager.o
 debug/moc_GroupDialog.o
 debug/moc_LoginWindow.o
 debug/moc_MainWindow.o
+debug/moc_NetworkManager.o
 debug/moc_NotesWidget.o
 debug/moc_RegistrationWindow.o
 debug/moc_TaskWidget.o
