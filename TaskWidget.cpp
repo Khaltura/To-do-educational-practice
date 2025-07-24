@@ -14,6 +14,7 @@
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QDebug>
+#include <QSqlError>
 
 TaskWidget::TaskWidget(DatabaseManager* dbManager, QWidget* parent)
     : QWidget(parent), m_dbManager(dbManager),
@@ -45,6 +46,14 @@ TaskWidget::TaskWidget(DatabaseManager* dbManager, QWidget* parent)
 
     // Первоначальная загрузка задач
     refreshTasks();
+}
+
+QSqlError DatabaseManager::lastError() const
+{
+    if (m_currentDb.isOpen()) {
+        return m_currentDb.lastError();
+    }
+    return m_mainDb.lastError();
 }
 
 void TaskWidget::setupUI()
@@ -337,7 +346,7 @@ void TaskWidget::addTask()
         return;
     }
 
-    if (m_dbManager->saveTask(text, m_selectedDate, m_selectedTime, m_selectedTag)) {
+    if (m_dbManager->saveTask(text, m_selectedDate, m_selectedTime, m_selectedTag, false)) {
         m_taskInput->clear();
         m_selectedDate = QDate();
         m_selectedTime = QTime();

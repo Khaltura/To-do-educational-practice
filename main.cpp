@@ -3,6 +3,7 @@
 #include <QStandardPaths>
 #include <QDir>
 #include <QDebug>
+#include <QSqlError>
 #include "MainWindow.h"
 #include "DatabaseManager.h"
 

@@ -6,6 +6,7 @@
 #include <QPushButton>
 #include <QMessageBox>
 #include <QListWidget>
+#include <QSqlError>
 
 UserWidget::UserWidget(QWidget *parent) : QWidget(parent)
 {
